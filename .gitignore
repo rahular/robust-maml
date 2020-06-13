@@ -98,6 +98,7 @@ ipython_config.py
 __pypackages__/
 data/
 .vscode/
+models/
 
 # Celery stuff
 celerybeat-schedule

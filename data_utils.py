@@ -1,8 +1,8 @@
 import os
 import pyconll
-import utils
 import logging
 import torch
+import download_utils
 
 from filelock import FileLock
 from enum import Enum
@@ -96,6 +96,7 @@ class PosDataset(Dataset):
                 )
                 if "O" not in labels:
                     labels = ["O"] + labels
+                write_labels(labels, data_dir)
 
                 self.features = convert_examples_to_features(
                     examples,
@@ -285,8 +286,21 @@ def convert_examples_to_features(
     return features
 
 
+def write_labels(labels, data_dir):
+    with open(os.path.join(data_dir, "labels.txt"), "w") as f:
+        f.write('\n'.join(labels) + '\n')
+
+
+def get_labels(data_dir):
+    with open(os.path.join(data_dir, "labels.txt"), "r") as f:
+        labels = f.read().splitlines()
+        if "O" not in labels:
+            labels = ["O"] + labels
+        return labels
+
+
 if __name__ == "__main__":
-    config = utils.get_config()
+    config = download_utils.get_config()
     tokenizer = AutoTokenizer.from_pretrained(config["model_type"])
     dataset = PosDataset(
         data_dir=config["ParTut_path"],
@@ -296,4 +310,3 @@ if __name__ == "__main__":
         mode=Split.train,
         overwrite_cache=False,
     )
-
