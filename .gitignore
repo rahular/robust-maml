@@ -99,6 +99,8 @@ __pypackages__/
 data/
 .vscode/
 models/
+lightning_logs/
+runs/
 
 # Celery stuff
 celerybeat-schedule
