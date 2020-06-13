@@ -2,6 +2,5 @@
     "url_ParTut_train": "http://archive.aueb.gr:8085/files/en_partut-ud-train.conllu",
     "url_ParTut_dev": "http://archive.aueb.gr:8085/files/en_partut-ud-dev.conllu",
     "url_ParTut_test": "http://archive.aueb.gr:8085/files/en_partut-ud-test.conllu",
-    "ParTut_path": "./data/partut/",
-    "model_type": "bert-base-uncased"
+    "ParTut_path": "./data/partut/"
 }

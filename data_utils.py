@@ -96,7 +96,8 @@ class PosDataset(Dataset):
                 )
                 if "O" not in labels:
                     labels = ["O"] + labels
-                write_labels(labels, data_dir)
+                if mode == Split.train:
+                    write_labels(labels, data_dir)
 
                 self.features = convert_examples_to_features(
                     examples,
@@ -301,12 +302,33 @@ def get_labels(data_dir):
 
 if __name__ == "__main__":
     config = download_utils.get_config()
-    tokenizer = AutoTokenizer.from_pretrained(config["model_type"])
-    dataset = PosDataset(
+    model_type = "bert-base-multilingual-cased"
+    tokenizer = AutoTokenizer.from_pretrained(model_type)
+    max_seq_length = 70
+
+    test_dataset = PosDataset(
         data_dir=config["ParTut_path"],
         tokenizer=tokenizer,
-        model_type=config["model_type"],
-        max_seq_length=70,
+        model_type=model_type,
+        max_seq_length=max_seq_length,
+        mode=Split.test,
+        overwrite_cache=False,
+    )
+
+    dev_dataset = PosDataset(
+        data_dir=config["ParTut_path"],
+        tokenizer=tokenizer,
+        model_type=model_type,
+        max_seq_length=max_seq_length,
+        mode=Split.dev,
+        overwrite_cache=False,
+    )
+
+    train_dataset = PosDataset(
+        data_dir=config["ParTut_path"],
+        tokenizer=tokenizer,
+        model_type=model_type,
+        max_seq_length=max_seq_length,
         mode=Split.train,
         overwrite_cache=False,
     )
