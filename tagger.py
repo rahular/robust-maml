@@ -55,7 +55,7 @@ class NERTransformer(BaseTransformer):
                 features = torch.load(cached_features_file)
             else:
                 logger.info("Creating features from dataset file at %s", args.data_dir)
-                examples = read_examples_from_file(args.data_dir, mode, args.max_seq_length)
+                examples, _ = read_examples_from_file(args.data_dir, mode, args.max_seq_length)
                 features = convert_examples_to_features(
                     examples,
                     self.labels,
