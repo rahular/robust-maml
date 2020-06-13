@@ -1,1 +1,5 @@
 pyconll==2.2.0
+torch==1.5.0
+transformers==2.11.0
+flake8==3.8.3
+black==19.10b0
