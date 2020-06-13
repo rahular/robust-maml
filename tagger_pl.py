@@ -16,7 +16,7 @@ from data_utils import convert_examples_to_features, get_labels, read_examples_f
 logger = logging.getLogger(__name__)
 
 
-class NERTransformer(BaseTransformer):
+class POSTransformer(BaseTransformer):
     """
     A training module for NER. See BaseTransformer for the core options.
     """
@@ -179,9 +179,9 @@ class NERTransformer(BaseTransformer):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     add_generic_args(parser, os.getcwd())
-    parser = NERTransformer.add_model_specific_args(parser, os.getcwd())
+    parser = POSTransformer.add_model_specific_args(parser, os.getcwd())
     args = parser.parse_args()
-    model = NERTransformer(args)
+    model = POSTransformer(args)
     trainer = generic_train(model, args)
 
     if args.do_predict:
