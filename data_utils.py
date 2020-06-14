@@ -1,8 +1,8 @@
 import os
+import json
 import pyconll
 import logging
 import torch
-import download_utils
 
 from filelock import FileLock
 from enum import Enum
@@ -303,35 +303,7 @@ def get_labels(data_dir):
         return labels
 
 
-if __name__ == "__main__":
-    config = download_utils.get_config()
-    model_type = "bert-base-multilingual-cased"
-    tokenizer = AutoTokenizer.from_pretrained(model_type)
-    max_seq_length = 70
+def get_data_config():
+    with open("data_config.json", "r") as f:
+        return json.load(f)
 
-    test_dataset = PosDataset(
-        data_dir=config["ParTut_path"],
-        tokenizer=tokenizer,
-        model_type=model_type,
-        max_seq_length=max_seq_length,
-        mode=Split.test,
-        overwrite_cache=False,
-    )
-
-    dev_dataset = PosDataset(
-        data_dir=config["ParTut_path"],
-        tokenizer=tokenizer,
-        model_type=model_type,
-        max_seq_length=max_seq_length,
-        mode=Split.dev,
-        overwrite_cache=False,
-    )
-
-    train_dataset = PosDataset(
-        data_dir=config["ParTut_path"],
-        tokenizer=tokenizer,
-        model_type=model_type,
-        max_seq_length=max_seq_length,
-        mode=Split.train,
-        overwrite_cache=False,
-    )

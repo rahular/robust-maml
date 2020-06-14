@@ -1,0 +1,7 @@
+{
+    "model_type": "bert-base-multilingual-cased",
+    "max_seq_length": 70,
+    "seed": 42,
+    "max_grad_norm": 5.0,
+    "output_dir": "models/partut"
+}

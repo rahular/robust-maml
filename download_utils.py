@@ -2,6 +2,7 @@ import os
 import json
 
 from urllib import request
+from data_utils import get_data_config
 
 
 def download_partut(config):
@@ -18,11 +19,6 @@ def download_partut(config):
     )
 
 
-def get_config():
-    with open("download_config.json", "r") as f:
-        return json.load(f)
-
-
 if __name__ == "__main__":
-    config = get_config()
+    config = get_data_config()
     download_partut(config)
