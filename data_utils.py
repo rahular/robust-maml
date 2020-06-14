@@ -96,8 +96,6 @@ class PosDataset(Dataset):
                 )
                 if "O" not in labels:
                     labels = ["O"] + labels
-                if mode == Split.train:
-                    write_labels(labels, data_dir)
 
                 self.features = convert_examples_to_features(
                     examples,
@@ -287,16 +285,21 @@ def convert_examples_to_features(
     return features
 
 
-def write_labels(labels, data_dir):
+def write_labels(data_dir):
+    _, labels = read_examples_from_file(data_dir, Split.train, 128)
+    if "O" not in labels:
+        labels = ["O"] + labels
     with open(os.path.join(data_dir, "labels.txt"), "w") as f:
         f.write('\n'.join(labels) + '\n')
+    return labels
 
 
 def get_labels(data_dir):
-    with open(os.path.join(data_dir, "labels.txt"), "r") as f:
+    labels_path = os.path.join(data_dir, "labels.txt")
+    if not os.path.isfile(labels_path):
+        return write_labels(data_dir)
+    with open(labels_path, "r") as f:
         labels = f.read().splitlines()
-        if "O" not in labels:
-            labels = ["O"] + labels
         return labels
 
 

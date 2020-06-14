@@ -221,30 +221,21 @@ class BaseTransformer(pl.LightningModule):
 
 
 class LoggingCallback(pl.Callback):
-    def on_validation_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
-        logger.info("***** Validation results *****")
+    def log(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         if pl_module.is_logger():
             metrics = trainer.callback_metrics
             # Log results
             for key in sorted(metrics):
                 if key not in ["log", "progress_bar"]:
-                    logger.info("{} = {}\n".format(key, str(metrics[key])))
+                    logger.info("{} = {}".format(key, str(metrics[key])))
+
+    def on_validation_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        logger.info("***** Validation results *****")
+        self.log(trainer, pl_module)
 
     def on_test_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
         logger.info("***** Test results *****")
-
-        if pl_module.is_logger():
-            metrics = trainer.callback_metrics
-
-            # Log and save results to file
-            output_test_results_file = os.path.join(
-                pl_module.hparams.output_dir, "test_results.txt"
-            )
-            with open(output_test_results_file, "w") as writer:
-                for key in sorted(metrics):
-                    if key not in ["log", "progress_bar"]:
-                        logger.info("{} = {}\n".format(key, str(metrics[key])))
-                        writer.write("{} = {}\n".format(key, str(metrics[key])))
+        self.log(trainer, pl_module)
 
 
 def add_generic_args(parser, root_dir):
