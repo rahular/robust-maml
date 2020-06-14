@@ -12,13 +12,13 @@ def get_model_config():
 
 
 class PosTagger(nn.Module):
-    def __init__(self, model_type, num_labels):
+    def __init__(self, model_type, num_labels, hidden_dropout_prob):
         super(PosTagger, self).__init__()
         self.model_type = model_type
         self.num_labels = num_labels
 
         self.bert = BertModel.from_pretrained(model_type)
-        self.dropout = nn.Dropout(self.bert.config.hidden_dropout_prob)
+        self.dropout = nn.Dropout(hidden_dropout_prob)
         self.classifier = nn.Linear(self.bert.config.hidden_size, num_labels)
 
     def forward(

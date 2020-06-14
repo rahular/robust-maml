@@ -37,7 +37,7 @@ class PredictionOutput(NamedTuple):
 	metrics: Optional[Dict[str, float]]
 
 
-def get_optimizers(model, num_warmup_steps, num_training_steps, lr=3e-4):
+def get_optimizers(model, num_warmup_steps, num_training_steps, lr=5e-5):
 	no_decay = ["bias", "LayerNorm.weight"]
 	optimizer_grouped_parameters = [
 		{
@@ -177,6 +177,13 @@ def save(output_dir, model, optimizer, scheduler):
 if __name__ == "__main__":
 	data_config = get_data_config()
 	model_config = get_model_config()
+
+	# for reproducibility
+	torch.manual_seed(model_config["seed"])
+	torch.backends.cudnn.deterministic = True
+	torch.backends.cudnn.benchmark = False
+	np.random.seed(model_config["seed"])
+
 	tokenizer = AutoTokenizer.from_pretrained(model_config["model_type"])
 
 	# load datasets
@@ -226,11 +233,11 @@ if __name__ == "__main__":
 
 	labels = get_labels(data_config["ParTut_path"])
 	label_map = {i: label for i, label in enumerate(labels)}
-	model = PosTagger(model_config["model_type"], len(labels))
+	model = PosTagger(model_config["model_type"], len(labels), model_config["hidden_dropout_prob"])
 	model = model.to(DEVICE)
 
 	# create optimizer and lr_scheduler
-	num_epochs = 10
+	num_epochs = 5
 	num_warmup_steps = 100
 	num_training_steps = len(train_loader) * num_epochs
 	optimizer, scheduler = get_optimizers(model, num_warmup_steps, num_training_steps)
@@ -248,7 +255,7 @@ if __name__ == "__main__":
 			)
 			optimizer.step()
 			scheduler.step()
-		logger.info(f"Finished epoch {epoch} with avg. training loss: {running_loss}")
+		logger.info(f"Finished epoch {epoch+1} with avg. training loss: {running_loss}")
 		train_f1 = evaluate(train_loader)["eval_f1"]
 		dev_f1 = evaluate(dev_loader)["eval_f1"]
 		logger.info(f"Training f1: {train_f1} and validation f1: {dev_f1}")
