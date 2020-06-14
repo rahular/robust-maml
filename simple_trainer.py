@@ -203,7 +203,7 @@ if __name__ == "__main__":
 	)
 
 	# create dataloaders
-	batch_size = 128
+	batch_size = 32
 	data_collator = DefaultDataCollator()
 	train_loader = DataLoader(
 		train_dataset,
