@@ -46,7 +46,7 @@ def get_optimizers(model, num_warmup_steps, num_training_steps, lr=5e-5):
 				for n, p in model.named_parameters()
 				if not any(nd in n for nd in no_decay)
 			],
-			"weight_decay": 0.1,
+			"weight_decay": model_config["weight_decay"],
 		},
 		{
 			"params": [
@@ -57,7 +57,7 @@ def get_optimizers(model, num_warmup_steps, num_training_steps, lr=5e-5):
 			"weight_decay": 0.0,
 		},
 	]
-	optimizer = AdamW(optimizer_grouped_parameters, lr=lr)
+	optimizer = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=lr)
 	scheduler = get_linear_schedule_with_warmup(
 		optimizer,
 		num_warmup_steps=num_warmup_steps,
@@ -238,9 +238,8 @@ if __name__ == "__main__":
 
 	# create optimizer and lr_scheduler
 	num_epochs = 5
-	num_warmup_steps = 100
 	num_training_steps = len(train_loader) * num_epochs
-	optimizer, scheduler = get_optimizers(model, num_warmup_steps, num_training_steps)
+	optimizer, scheduler = get_optimizers(model, model_config["num_warmup_steps"], num_training_steps)
 
 	best_f1 = 0.0
 	best_model_suffix = None
