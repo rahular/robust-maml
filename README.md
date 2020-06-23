@@ -5,13 +5,11 @@
 3. Download data: `python download_utils.py`
 4. Train pos-tagger: `python simple-trainer.py`
 
-*Note*: Model is currently overfitting badly. Need to tune the hyperparams.
-
 ### Current results
+
+Results after trained for *3* epochs:
 
 |Model                         |Data  |Train F1|Test F1|
 |------------------------------|------|--------|-------|
-|bert-multilingual-base-cased  |partut|0.992   |0.363  |
-|bert-multilingual-base-uncased|partut|0.990   |0.556  |
-|bert-base-cased               |partut|0.988   |0.470  |
-|bert-base-uncased             |partut|0.988   |0.519  |
+|bert-multilingual-base-cased  |partut|0.992   |0.803  |
+|bert-multilingual-base-cased  |EWT   |?       |0.782  |
