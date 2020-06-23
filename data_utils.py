@@ -152,6 +152,44 @@ def read_examples_from_file(
     return examples, list(label_set)
 
 
+def _read_examples_from_file(
+    data_dir, mode: Union[Split, str], max_seq_length
+) -> List[InputExample]:
+    if isinstance(mode, Split):
+        mode = mode.value
+    file_path = os.path.join(data_dir, f"{mode}.conllu")
+    guid_index = 1
+    examples = []
+    label_set = set()
+
+    def add_example(words, labels):
+        label_set.update(labels)
+        for idx in range(0, len(words), max_seq_length):
+            examples.append(
+                InputExample(
+                    guid=f"{mode}-{guid_index}",
+                    words=words[idx : idx + max_seq_length],
+                    labels=labels[idx : idx + max_seq_length],
+                )
+            )
+
+    with open(file_path, "r") as f:
+        words, labels = [], []
+        for line in f.readlines():
+            line = line.strip()
+            if not line:
+                add_example(words, labels)
+                words, labels = [], []
+            else:
+                word, label = line.split()
+                words.append(word)
+                labels.append(label)
+        if len(words) > 0:
+            add_example(words, labels)
+
+    return examples, list(label_set)
+
+
 def convert_examples_to_features(
     examples: List[InputExample],
     label_list: List[str],
@@ -194,6 +232,10 @@ def convert_examples_to_features(
                 label_ids.extend(
                     [label_map[label]] + [pad_token_label_id] * (len(word_tokens) - 1)
                 )
+                # Use the real label id for all sub-tokens
+                # label_ids.extend(
+                #     [label_map[label]] * (len(word_tokens))
+                # )
 
         # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
         special_tokens_count = tokenizer.num_special_tokens_to_add()
@@ -290,7 +332,7 @@ def write_labels(data_dir):
     if "O" not in labels:
         labels = ["O"] + labels
     with open(os.path.join(data_dir, "labels.txt"), "w") as f:
-        f.write('\n'.join(labels) + '\n')
+        f.write("\n".join(labels) + "\n")
     return labels
 
 
