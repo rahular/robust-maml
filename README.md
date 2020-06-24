@@ -12,4 +12,4 @@ Results after trained for *3* epochs:
 |Model                         |Data  |Train F1|Test F1|
 |------------------------------|------|--------|-------|
 |bert-multilingual-base-cased  |partut|0.992   |0.803  |
-|bert-multilingual-base-cased  |EWT   |?       |0.782  |
+|bert-multilingual-base-cased  |EWT   |0.994   |0.782  |
