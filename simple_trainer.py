@@ -264,9 +264,7 @@ if __name__ == "__main__":
             scheduler.step()
             model.zero_grad()
         logger.info(f"Finished epoch {epoch+1} with avg. training loss: {running_loss}")
-        # train_f1 = evaluate(train_loader)["eval_f1"]
         dev_f1 = evaluate(dev_loader)["eval_f1"]
-        # logger.info(f"Training f1: {train_f1} and validation f1: {dev_f1}")
         logger.info(f"Validation f1: {dev_f1}")
 
         if dev_f1 > best_f1:
@@ -280,6 +278,7 @@ if __name__ == "__main__":
         )
     )
     model = model.to(DEVICE)
+    train_f1 = evaluate(train_loader)["eval_f1"]
     test_f1 = evaluate(test_loader)["eval_f1"]
-    logger.info(f"Finished training. Test f1: {test_f1}")
+    logger.info(f"Finished training. Train f1: {train_f1}, Test f1: {test_f1}")
 
