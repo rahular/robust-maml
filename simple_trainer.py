@@ -72,7 +72,6 @@ def _training_step(model, inputs, optimizer):
     for k, v in inputs.items():
         inputs[k] = v.to(DEVICE)
 
-    # logger.error(inputs)
     outputs = model(**inputs)
     loss = outputs[0]
     loss.backward()
@@ -165,9 +164,9 @@ def save(model, optimizer, scheduler):
     save_dir = os.path.join(model_config["output_dir"], args.dataset)
     os.makedirs(save_dir, exist_ok=True)
     logger.info("Saving model checkpoint to %s", save_dir)
-    torch.save(model.state_dict(), os.path.join(save_dir, f"best_model.th"))
-    torch.save(optimizer.state_dict(), os.path.join(save_dir, f"best_optim.th"))
-    torch.save(scheduler.state_dict(), os.path.join(save_dir, f"best_scheduler.th"))
+    torch.save(model.state_dict(), os.path.join(save_dir, "best_model.th"))
+    torch.save(optimizer.state_dict(), os.path.join(save_dir, "best_optim.th"))
+    torch.save(scheduler.state_dict(), os.path.join(save_dir, "best_scheduler.th"))
 
 
 def init_args():
@@ -186,15 +185,15 @@ if __name__ == "__main__":
 
     # for reproducibility
     torch.manual_seed(model_config["seed"])
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
     np.random.seed(model_config["seed"])
 
     tokenizer = AutoTokenizer.from_pretrained(model_config["model_type"])
+    labels = get_labels(dataset_path)
 
     # load datasets
     train_dataset = PosDataset(
         dataset_path,
+        labels,
         tokenizer,
         model_config["model_type"],
         model_config["max_seq_length"],
@@ -202,6 +201,7 @@ if __name__ == "__main__":
     )
     dev_dataset = PosDataset(
         dataset_path,
+        labels,
         tokenizer,
         model_config["model_type"],
         model_config["max_seq_length"],
@@ -209,6 +209,7 @@ if __name__ == "__main__":
     )
     test_dataset = PosDataset(
         dataset_path,
+        labels,
         tokenizer,
         model_config["model_type"],
         model_config["max_seq_length"],
@@ -236,7 +237,6 @@ if __name__ == "__main__":
         collate_fn=DefaultDataCollator().collate_batch,
     )
 
-    labels = get_labels(dataset_path)
     label_map = {i: label for i, label in enumerate(labels)}
     model = PosTagger(
         model_config["model_type"], len(labels), model_config["hidden_dropout_prob"]
@@ -250,8 +250,8 @@ if __name__ == "__main__":
         model, model_config["num_warmup_steps"], num_training_steps
     )
 
-    best_f1 = 0.0
-    best_model_suffix = None
+    best_f1, patience_ctr = 0.0, 0
+    best_state_dict = None
     for epoch in range(num_epochs):
         running_loss = 0.0
         epoch_iterator = tqdm(train_loader, desc="Training")
@@ -271,6 +271,13 @@ if __name__ == "__main__":
             logger.info("Found new best model!")
             best_f1 = dev_f1
             save(model, optimizer, scheduler)
+            best_state_dict = model.state_dict()
+            patience_ctr = 0
+        else:
+            patience_ctr += 1
+            if patience_ctr == model_config["patience"]:
+                logger.info("Ran out of patience. Stopping training early...")
+                break
 
     model.load_state_dict(
         torch.load(

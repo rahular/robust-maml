@@ -18,28 +18,27 @@ class PosTagger(nn.Module):
         self.num_labels = num_labels
 
         self.bert = BertModel.from_pretrained(model_type)
-        self.dropout = nn.Dropout(hidden_dropout_prob)
-        self.classifier = nn.Linear(self.bert.config.hidden_size, num_labels)
+        self.classifier = nn.Sequential(
+            nn.Dropout(hidden_dropout_prob),
+            nn.Linear(self.bert.config.hidden_size, 1024),
+            nn.Dropout(hidden_dropout_prob),
+            nn.ReLU(),
+            nn.Linear(1024, num_labels),
+        )
 
     def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        labels=None,
+        self, input_ids=None, attention_mask=None, token_type_ids=None, labels=None,
     ):
         outputs = self.bert(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
+            input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids,
         )
 
         sequence_output = outputs[0]
-
-        sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
 
-        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+        outputs = (logits,) + outputs[
+            2:
+        ]  # add hidden states and attention if they are here
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             # Only keep active parts of the loss
@@ -47,7 +46,9 @@ class PosTagger(nn.Module):
                 active_loss = attention_mask.view(-1) == 1
                 active_logits = logits.view(-1, self.num_labels)
                 active_labels = torch.where(
-                    active_loss, labels.view(-1), torch.tensor(loss_fct.ignore_index).type_as(labels)
+                    active_loss,
+                    labels.view(-1),
+                    torch.tensor(loss_fct.ignore_index).type_as(labels),
                 )
                 loss = loss_fct(active_logits, active_labels)
             else:
