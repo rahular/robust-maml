@@ -160,13 +160,31 @@ def evaluate(loader):
     return output.metrics
 
 
-def save(model, optimizer, scheduler):
-    save_dir = os.path.join(model_config["output_dir"], args.dataset)
+def get_model_save_path():
+    return os.path.join(
+        model_config["output_dir"],
+        "{}_{}".format(model_config["model_type"], args.dataset),
+    )
+
+
+def save(model, optimizer, scheduler, last_epoch):
+    save_dir = get_model_save_path()
     os.makedirs(save_dir, exist_ok=True)
     logger.info("Saving model checkpoint to %s", save_dir)
+    # save model config as well
+    with open(os.path.join(save_dir, "model_config.json"), "w") as f:
+        f.write(json.dumps(model_config, indent=2))
+    # save model weigths
     torch.save(model.state_dict(), os.path.join(save_dir, "best_model.th"))
-    torch.save(optimizer.state_dict(), os.path.join(save_dir, "best_optim.th"))
-    torch.save(scheduler.state_dict(), os.path.join(save_dir, "best_scheduler.th"))
+    # save training state if required
+    torch.save(
+        {
+            "optimizer": optimizer.state_dict(),
+            "lr_scheduler": scheduler.state_dict(),
+            "last_epoch": last_epoch,
+        },
+        os.path.join(save_dir, "optim.th"),
+    )
 
 
 def init_args():
@@ -270,7 +288,7 @@ if __name__ == "__main__":
         if dev_f1 > best_f1:
             logger.info("Found new best model!")
             best_f1 = dev_f1
-            save(model, optimizer, scheduler)
+            save(model, optimizer, scheduler, epoch)
             best_state_dict = model.state_dict()
             patience_ctr = 0
         else:
@@ -280,12 +298,24 @@ if __name__ == "__main__":
                 break
 
     model.load_state_dict(
-        torch.load(
-            os.path.join(model_config["output_dir"], args.dataset, "best_model.th")
-        )
+        torch.load(os.path.join(get_model_save_path(), "best_model.th"))
     )
     model = model.to(DEVICE)
-    train_f1 = evaluate(train_loader)["eval_f1"]
-    test_f1 = evaluate(test_loader)["eval_f1"]
-    logger.info(f"Finished training. Train f1: {train_f1}, Test f1: {test_f1}")
+    train_metrics = evaluate(train_loader)
+    dev_metrics = evaluate(dev_loader)
+    test_metrics = evaluate(test_loader)
+
+    # dump results to file and stdout
+    final_result = json.dumps(
+        {
+            "train": train_metrics,
+            "validation": dev_metrics,
+            "test": test_metrics,
+            "num_epochs": epoch,
+        },
+        indent=2,
+    )
+    with open(os.path.join(get_model_save_path(), "result.json"), "w") as f:
+        f.write(final_result)
+    logger.info(f"Final result: {final_result}")
 
