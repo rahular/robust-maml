@@ -77,7 +77,7 @@ class PosDataset(Dataset):
         cached_features_file = os.path.join(
             data_dir,
             "cached_{}_{}_{}".format(
-                mode.value, tokenizer.__class__.__name__, str(max_seq_length)
+                mode.value, model_type, str(max_seq_length)
             ),
         )
 
