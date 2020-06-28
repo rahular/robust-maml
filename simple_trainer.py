@@ -9,6 +9,7 @@ import numpy as np
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import RandomSampler, SequentialSampler
+from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoTokenizer
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from transformers.data.data_collator import DefaultDataCollator
@@ -255,6 +256,9 @@ if __name__ == "__main__":
         collate_fn=DefaultDataCollator().collate_batch,
     )
 
+    # for tensorboard logging
+    tb_writer = SummaryWriter(os.path.join(get_model_save_path(), "logs"))
+
     label_map = {i: label for i, label in enumerate(labels)}
     model = PosTagger(
         model_config["model_type"], len(labels), model_config["hidden_dropout_prob"]
@@ -273,16 +277,23 @@ if __name__ == "__main__":
     for epoch in range(num_epochs):
         running_loss = 0.0
         epoch_iterator = tqdm(train_loader, desc="Training")
-        for inputs in epoch_iterator:
-            running_loss += _training_step(model, inputs, optimizer)
+        for training_step, inputs in enumerate(epoch_iterator):
+            step_loss = _training_step(model, inputs, optimizer)
+            running_loss += step_loss
             torch.nn.utils.clip_grad_norm_(
                 model.parameters(), model_config["max_grad_norm"]
             )
             optimizer.step()
             scheduler.step()
             model.zero_grad()
-        logger.info(f"Finished epoch {epoch+1} with avg. training loss: {running_loss}")
+            tb_writer.add_scalar(
+                "Training loss", step_loss, epoch * len(epoch_iterator) + training_step
+            )
+        logger.info(
+            f"Finished epoch {epoch+1} with avg. training loss: {running_loss/len(inputs)}"
+        )
         dev_f1 = evaluate(dev_loader)["eval_f1"]
+        tb_writer.add_scalar("Validation F1", dev_f1, epoch)
         logger.info(f"Validation f1: {dev_f1}")
 
         if dev_f1 > best_f1:
