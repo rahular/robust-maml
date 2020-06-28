@@ -12,6 +12,6 @@
 |------------------------------|------|--------|-------|
 |bert-base-cased               |partut|0.9876  |0.9605 |
 |bert-multilingual-base-cased  |partut|0.9959  |0.9605 |
-|bert-base-cased               |EWT   |0.9982  |0.9577 |
-|bert-multilingual-base-cased  |EWT   |0.9978  |0.9485 |
+|bert-base-cased               |ewt   |0.9982  |0.9577 |
+|bert-multilingual-base-cased  |ewt   |0.9978  |0.9485 |
 
