@@ -287,18 +287,25 @@ if __name__ == "__main__":
             scheduler.step()
             model.zero_grad()
             tb_writer.add_scalar(
-                "Training loss", step_loss, epoch * len(epoch_iterator) + training_step
+                "loss/step_loss", step_loss, epoch * len(epoch_iterator) + training_step
             )
         logger.info(
             f"Finished epoch {epoch+1} with avg. training loss: {running_loss/len(inputs)}"
         )
-        dev_f1 = evaluate(dev_loader)["eval_f1"]
-        tb_writer.add_scalar("Validation F1", dev_f1, epoch)
-        logger.info(f"Validation f1: {dev_f1}")
+        dev_metrics = evaluate(dev_loader)
 
-        if dev_f1 > best_f1:
+        tb_writer.add_scalar("loss/train_loss", running_loss / len(inputs), epoch)
+        tb_writer.add_scalar("loss/dev_loss", dev_metrics["eval_loss"], epoch)
+        tb_writer.add_scalar(
+            "metrics/dev_precision", dev_metrics["eval_precision"], epoch
+        )
+        tb_writer.add_scalar("metrics/dev_recall", dev_metrics["eval_recall"], epoch)
+        tb_writer.add_scalar("metrics/dev_f1", dev_metrics["eval_f1"], epoch)
+        logger.info("Validation f1: {}".format(dev_metrics["eval_f1"]))
+
+        if dev_metrics["eval_f1"] > best_f1:
             logger.info("Found new best model!")
-            best_f1 = dev_f1
+            best_f1 = dev_metrics["eval_f1"]
             save(model, optimizer, scheduler, epoch)
             best_state_dict = model.state_dict()
             patience_ctr = 0
