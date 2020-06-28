@@ -188,6 +188,19 @@ def save(model, optimizer, scheduler, last_epoch):
     )
 
 
+def write_tensorboard(metrics, epoch, name="train"):
+    tb_writer.add_scalar("loss/{}_loss".format(name), metrics["eval_loss"], epoch)
+    tb_writer.add_scalars(
+        "metrics/{}_prf".format(name),
+        {
+            "precision": metrics["eval_precision"],
+            "recall": metrics["eval_recall"],
+            "f1_score": metrics["eval_f1"],
+        },
+        epoch,
+    )
+
+
 def init_args():
     parser = argparse.ArgumentParser(
         description="Train POS tagging on various UD datasets"
@@ -292,16 +305,16 @@ if __name__ == "__main__":
         logger.info(
             f"Finished epoch {epoch+1} with avg. training loss: {running_loss/len(inputs)}"
         )
+        train_metrics = evaluate(train_loader)
         dev_metrics = evaluate(dev_loader)
+        write_tensorboard(train_metrics, epoch, "train")
+        write_tensorboard(dev_metrics, epoch, "validation")
 
-        tb_writer.add_scalar("loss/train_loss", running_loss / len(inputs), epoch)
-        tb_writer.add_scalar("loss/dev_loss", dev_metrics["eval_loss"], epoch)
-        tb_writer.add_scalar(
-            "metrics/dev_precision", dev_metrics["eval_precision"], epoch
+        logger.info(
+            "Training f1: {}, Validation f1: {}".format(
+                train_metrics["eval_f1"], dev_metrics["eval_f1"]
+            )
         )
-        tb_writer.add_scalar("metrics/dev_recall", dev_metrics["eval_recall"], epoch)
-        tb_writer.add_scalar("metrics/dev_f1", dev_metrics["eval_f1"], epoch)
-        logger.info("Validation f1: {}".format(dev_metrics["eval_f1"]))
 
         if dev_metrics["eval_f1"] > best_f1:
             logger.info("Found new best model!")
