@@ -14,7 +14,7 @@
     "outer_lr": 0.005,
     "inner_lr": 0.1,
     "task_batch_size":20,
-    "num_episodes": 2,
+    "num_episodes": 32,
     "inner_loop_steps": 5,
     "ways": 2,
     "shots": 100

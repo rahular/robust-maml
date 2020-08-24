@@ -18,7 +18,7 @@ from transformers.data.data_collator import DefaultDataCollator
 from typing import Dict, NamedTuple, Optional
 from seqeval.metrics import f1_score, precision_score, recall_score
 from data_utils import PosDataset, Split, get_data_config, get_labels
-from simple_tagger import PosTagger, get_model_config
+from simple_tagger import BERT, Classifier, get_model_config
 
 import learn2learn as l2l
 
@@ -43,35 +43,54 @@ class _BatchedDataset(torch.utils.data.Dataset):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        return (self.input_ids[idx], self.attention_mask[idx], self.token_type_ids[idx], self.labels[idx], self.class_index[idx])
+        return (
+            self.input_ids[idx],
+            self.attention_mask[idx],
+            self.token_type_ids[idx],
+            self.labels[idx],
+            self.class_index[idx],
+        )
 
 
 def str_to_tensor(x):
-    return torch.tensor(list(map(int, x.split(' '))))
+    return torch.tensor(list(map(int, x.split(" "))))
 
-def compute_loss(task, model, learner, batch_size):
+
+def compute_loss(task, bert_model, learner, batch_size):
     loss = 0.0
-    for batch, (input_ids, attention_mask, token_type_ids, labels, class_index) in enumerate(torch.utils.data.DataLoader(
-                                                    _BatchedDataset(task), batch_size=batch_size, shuffle=True, num_workers=0)):
+    for (
+        batch,
+        (input_ids, attention_mask, token_type_ids, labels, class_index),
+    ) in enumerate(
+        torch.utils.data.DataLoader(
+            _BatchedDataset(task), batch_size=batch_size, shuffle=True, num_workers=0
+        )
+    ):
 
         input_ids = torch.stack([str_to_tensor(x) for x in input_ids]).to(DEVICE)
-        attention_mask = torch.stack([str_to_tensor(x) for x in attention_mask]).to(DEVICE)
-        token_type_ids = torch.stack([str_to_tensor(x) for x in token_type_ids]).to(DEVICE)
+        attention_mask = torch.stack([str_to_tensor(x) for x in attention_mask]).to(
+            DEVICE
+        )
+        token_type_ids = torch.stack([str_to_tensor(x) for x in token_type_ids]).to(
+            DEVICE
+        )
         labels = torch.stack([str_to_tensor(x) for x in labels]).to(DEVICE)
 
-        #print("Batch:", batch)
-        #print("Input_IDs:", input_ids)
+        # print("Batch:", batch)
+        # print("Input_IDs:", input_ids)
         # print("Attention Mask:", attention_mask)
         # print("Token Type IDs:", token_type_ids)
-        #print("Labels:", labels)
-        #print("Class_Index:", class_index)
-
-        output = learner(input_ids, attention_mask, token_type_ids, labels)
+        # print("Labels:", labels)
+        # print("Class_Index:", class_index)
+        with torch.no_grad():
+            bert_output = bert_model(input_ids, attention_mask, token_type_ids)
+        #bert_output = bert_output.to(DEVICE)
+        output = learner(bert_output, labels=labels, attention_mask=attention_mask)
         # TODO: confirm that this loss is the mean across all elements of the batch
         curr_loss = output[0]
         loss += curr_loss
 
-    loss /= (batch+1)
+    loss /= (batch + 1)
     return loss
 
 
@@ -93,10 +112,7 @@ def save(model, optimizer, last_epoch):
     torch.save(model.state_dict(), os.path.join(save_dir, "best_model.th"))
     # save training state if required
     torch.save(
-        {
-            "optimizer": optimizer.state_dict(),
-            "last_epoch": last_epoch,
-        },
+        {"optimizer": optimizer.state_dict(), "last_epoch": last_epoch,},
         os.path.join(save_dir, "optim.th"),
     )
 
@@ -134,7 +150,7 @@ if __name__ == "__main__":
 
     class_index = 0
 
-    #load individual datasets
+    # load individual datasets
     for dataset_path in dataset_paths:
         label = get_labels(dataset_path)
         labels.append(label)
@@ -174,9 +190,9 @@ if __name__ == "__main__":
         )
 
         test_datasets.append(test_dataset)
-        class_index+=1
+        class_index += 1
 
-    #concatenate individual datasets into a single dataset
+    # concatenate individual datasets into a single dataset
     combined_train_dataset = ConcatDataset(train_datasets)
     combined_dev_dataset = ConcatDataset(dev_datasets)
     combined_test_dataset = ConcatDataset(test_datasets)
@@ -192,43 +208,53 @@ if __name__ == "__main__":
 
     # create task generators
     train_gen = l2l.data.TaskDataset(
-            train_dataset, num_tasks=20000,
-            task_transforms=[
-                l2l.data.transforms.FusedNWaysKShots(train_dataset, n=ways, k=shots),
-                l2l.data.transforms.LoadData(train_dataset),
-                #l2l.data.transforms.RemapLabels(train_dataset)
-                ],)
+        train_dataset,
+        num_tasks=20000,
+        task_transforms=[
+            l2l.data.transforms.FusedNWaysKShots(train_dataset, n=ways, k=shots),
+            l2l.data.transforms.LoadData(train_dataset),
+            # l2l.data.transforms.RemapLabels(train_dataset)
+        ],
+    )
 
     dev_gen = l2l.data.TaskDataset(
-            dev_dataset, num_tasks=20000,
-            task_transforms=[
-                l2l.data.transforms.FusedNWaysKShots(dev_dataset, n=ways, k=shots),
-                l2l.data.transforms.LoadData(dev_dataset),
-                #l2l.data.transforms.RemapLabels(train_dataset)
-                ],)
+        dev_dataset,
+        num_tasks=20000,
+        task_transforms=[
+            l2l.data.transforms.FusedNWaysKShots(dev_dataset, n=ways, k=shots),
+            l2l.data.transforms.LoadData(dev_dataset),
+            # l2l.data.transforms.RemapLabels(train_dataset)
+        ],
+    )
 
     test_gen = l2l.data.TaskDataset(
-            test_dataset, num_tasks=20000,
-            task_transforms=[
-                l2l.data.transforms.FusedNWaysKShots(test_dataset, n=ways, k=shots),
-                l2l.data.transforms.LoadData(test_dataset),
-                #l2l.data.transforms.RemapLabels(train_dataset)
-                ],)
+        test_dataset,
+        num_tasks=20000,
+        task_transforms=[
+            l2l.data.transforms.FusedNWaysKShots(test_dataset, n=ways, k=shots),
+            l2l.data.transforms.LoadData(test_dataset),
+            # l2l.data.transforms.RemapLabels(train_dataset)
+        ],
+    )
 
     # for tensorboard logging
     tb_writer = SummaryWriter(os.path.join(get_model_save_path(), "logs"))
 
     # define the postagger model
-    model = PosTagger(
-        model_config["model_type"], len(labels[0]), model_config["hidden_dropout_prob"]
-    )
-    model = model.to(DEVICE)
+    bert_model = BERT(model_config["model_type"])
+    bert_model.eval()
+    bert_model = bert_model.to(DEVICE)
+
+    postagger = Classifier(len(labels[0]), model_config["hidden_dropout_prob"], bert_model.get_hidden_size())
+    postagger.to(DEVICE)
 
     num_epochs = model_config["num_epochs"]
     if model_config["is_fomaml"]:
-        meta_model = l2l.algorithms.MAML(model, lr=model_config["inner_lr"], first_order=True)
+        meta_model = l2l.algorithms.MAML(
+            postagger, lr=model_config["inner_lr"], first_order=True
+        )
     else:
-        meta_model = l2l.algorithms.MAML(model, lr=model_config["inner_lr"])
+        meta_model = l2l.algorithms.MAML(postagger, lr=model_config["inner_lr"])
     # outer loop optimizer
     opt = optim.Adam(meta_model.parameters(), lr=model_config["outer_lr"])
     tqdm_bar = tqdm(range(num_epochs))
@@ -237,42 +263,50 @@ if __name__ == "__main__":
     inner_loop_steps = model_config["inner_loop_steps"]
 
     best_dev_error = np.inf
-    for iteration in tqdm_bar: #iterations loop
+    for iteration in tqdm_bar:  # iterations loop
         dev_iteration_error = 0.0
         train_iteration_error = 0.0
-        for episode in range(num_episodes): # episode loop = task loop
+        for episode in range(num_episodes):  # episode loop = task loop
             # print("Episode:", episode)
             # clone the meta model for use in inner loop. Back-propagating losses on the cloned module will populate the
             # buffers of the original module
             learner = meta_model.clone()
-            #sample train and validation tasks
+            # sample train and validation tasks
             train_task, dev_task = train_gen.sample(), dev_gen.sample()
 
             # Inner Loop
-            for step in range(inner_loop_steps): #inner loop
-                #print("Step:", step)
-                train_error = compute_loss(train_task, model, learner, batch_size=task_bs)
-                grads = torch.autograd.grad(train_error, learner.parameters(), create_graph=True, allow_unused=True)
+            for step in range(inner_loop_steps):  # inner loop
+                # print("Step:", step)
+                train_error = compute_loss(
+                    train_task, bert_model, learner, batch_size=task_bs
+                )
+                grads = torch.autograd.grad(
+                    train_error,
+                    learner.parameters(),
+                    create_graph=True,
+                    allow_unused=True,
+                )
                 l2l.algorithms.maml_update(learner, model_config["inner_lr"], grads)
-                #print("Train Error:", train_error)
+                # print("Train Error:", train_error)
 
             # Compute validation loss / query loss
-            dev_error = compute_loss(dev_task, model, learner, batch_size=task_bs)
+            dev_error = compute_loss(dev_task, bert_model, learner, batch_size=task_bs)
             dev_iteration_error += dev_error
-            #print("Dev_Error:", dev_error)
+            # print("Dev_Error:", dev_error)
             train_iteration_error += train_error
 
         # average the validation and train loss over all tasks
         dev_iteration_error /= num_episodes
         train_iteration_error /= num_episodes
-        tqdm_bar.set_description("Validation Loss : {:.3f}".format(dev_iteration_error.item()))
+        tqdm_bar.set_description(
+            "Validation Loss : {:.3f}".format(dev_iteration_error.item())
+        )
         tb_writer.add_scalar("validation_loss", dev_iteration_error, iteration)
         tb_writer.add_scalar("training loss", train_iteration_error, iteration)
 
-
         # Outer Loop
         opt.zero_grad()
-        #backprop validation error in the outer loop
+        # backprop validation error in the outer loop
         dev_iteration_error.backward()
         opt.step()
         meta_model.zero_grad()
@@ -287,7 +321,7 @@ if __name__ == "__main__":
         if dev_iteration_error < best_dev_error:
             logger.info("Found new best model!")
             best_dev_error = dev_iteration_error
-            save(meta_model, optimizer, iteration)
+            save(meta_model, opt, iteration)
             best_state_dict = meta_model.state_dict()
             patience_ctr = 0
         else:
@@ -295,7 +329,4 @@ if __name__ == "__main__":
             if patience_ctr == model_config["patience"]:
                 logger.info("Ran out of patience. Stopping training early...")
                 break
-    logger.info(
-        f"Best validation loss = {best_dev_error}"
-    )
-
+    logger.info(f"Best validation loss = {best_dev_error}")
