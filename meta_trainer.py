@@ -97,7 +97,8 @@ def compute_loss(task, bert_model, learner, batch_size):
 def get_model_save_path():
     return os.path.join(
         model_config["output_dir"],
-        "{}_{}".format(model_config["model_type"], args.datasets),
+        "posbert_i_{}_o_{}_s_{}_d_{}".format(model_config["inner_lr"], model_config["outer_lr"], model_config["shots"],
+            args.datasets),
     )
 
 
@@ -121,7 +122,7 @@ def init_args():
     parser = argparse.ArgumentParser(
         description="Train POS tagging on various UD datasets"
     )
-    parser.add_argument("datasets", help="Dataset to train on")
+    parser.add_argument("--datasets", help="Dataset to train on")
     return parser.parse_args()
 
 
