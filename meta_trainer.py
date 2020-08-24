@@ -110,7 +110,10 @@ def save(model, optimizer, last_epoch):
     with open(os.path.join(save_dir, "model_config.json"), "w") as f:
         f.write(json.dumps(model_config, indent=2))
     # save model weigths
-    torch.save(model.state_dict(), os.path.join(save_dir, "best_model.th"))
+    #print(model.state_dict().keys())
+    model_to_save = model.module if hasattr(model, 'module') else model
+    #print(model_to_save.state_dict().keys())
+    torch.save(model_to_save.state_dict(), os.path.join(save_dir, "best_model.th"))
     # save training state if required
     torch.save(
         {"optimizer": optimizer.state_dict(), "last_epoch": last_epoch,},
