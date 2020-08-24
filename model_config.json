@@ -3,20 +3,20 @@
     "max_seq_length": 128,
     "weight_decay": 0.1,
     "batch_size": 32,
-    "num_epochs": 100,
-    "patience": 5,
+    "num_epochs": 500,
+    "patience": 10,
     "num_warmup_steps": 100,
     "seed": 42,
     "max_grad_norm": 5.0,
     "hidden_dropout_prob": 0.2,
     "output_dir": "./models",
     "is_fomaml": true,
-    "outer_lr": 0.005,
+    "outer_lr": 0.0005,
     "inner_lr": 0.1,
     "task_batch_size":20,
     "num_episodes": 32,
-    "inner_loop_steps": 5,
+    "inner_loop_steps": 3,
     "ways": 2,
-    "shots": 100
+    "shots": 50
 
 }
