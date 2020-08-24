@@ -16,7 +16,7 @@ from transformers.data.data_collator import DefaultDataCollator
 
 from typing import Dict, NamedTuple, Optional
 from seqeval.metrics import f1_score, precision_score, recall_score
-from data_utils import PosDataset, Split, get_data_config, get_labels
+from data_utils_orig import PosDataset, Split, get_data_config, get_labels
 from simple_tagger import PosTagger, get_model_config
 
 logging.basicConfig(

@@ -18,6 +18,7 @@ class PosTagger(nn.Module):
         self.num_labels = num_labels
 
         self.bert = BertModel.from_pretrained(model_type)
+        self.bert.eval()
         self.classifier = nn.Sequential(
             nn.Dropout(hidden_dropout_prob),
             nn.Linear(self.bert.config.hidden_size, 1024),
@@ -26,9 +27,7 @@ class PosTagger(nn.Module):
             nn.Linear(1024, num_labels),
         )
 
-    def forward(
-        self, input_ids=None, attention_mask=None, token_type_ids=None, labels=None,
-    ):
+    def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, labels=None,):
         outputs = self.bert(
             input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids,
         )
@@ -36,9 +35,8 @@ class PosTagger(nn.Module):
         sequence_output = outputs[0]
         logits = self.classifier(sequence_output)
 
-        outputs = (logits,) + outputs[
-            2:
-        ]  # add hidden states and attention if they are here
+        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             # Only keep active parts of the loss

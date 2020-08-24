@@ -22,61 +22,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-#from torchmeta.utils.data import Dataset, ClassDataset, CombinationMetaDataset
-
-# class POSMetaDataset(CombinationMetaDataset):
-
-#     def __init__(self, root, num_classes_per_task=None, meta_train=False,
-#                  meta_val=False, meta_test=False, meta_split=None,
-#                  use_vinyals_split=False, transform=None, target_transform=None,
-#                  dataset_transform=None, class_augmentations=None, download=False):
-#         dataset = PosClassDataset(root, meta_train=meta_train,
-#             meta_val=meta_val, meta_test=meta_test,
-#             use_vinyals_split=use_vinyals_split, transform=transform,
-#             meta_split=meta_split, class_augmentations=class_augmentations,
-#             download=download)
-#         super(POSMetaDataset, self).__init__(dataset, num_classes_per_task,
-#             target_transform=target_transform, dataset_transform=dataset_transform)
-
-# class PosClassDataset(ClassDataset):
-#     def __init__(self, root, meta_train=False, meta_val=False, meta_test=False,
-#                  meta_split=None, use_vinyals_split=False, transform=None,
-#                  class_augmentations=None, download=False):
-#         super(PosClassDataset, self).__init__(meta_train=meta_train,
-#             meta_val=meta_val, meta_test=meta_test, meta_split=meta_split,
-#             class_augmentations=class_augmentations)
-
-#         if self.meta_val and (not use_vinyals_split):
-#             raise ValueError('Trying to use the meta-validation without the '
-#                 'Vinyals split. You must set `use_vinyals_split=True` to use '
-#                 'the meta-validation split.')
-
-#         self.root = os.path.join(os.path.expanduser(root), self.folder)
-#         self.use_vinyals_split = use_vinyals_split
-#         self.transform = transform
-
-#         self.split_filename = os.path.join(self.root, self.filename)
-#         self.split_filename_labels = os.path.join(self.root,
-#             self.filename_labels.format('vinyals_' if use_vinyals_split else '',
-#             self.meta_split))
-
-#         self._data = None
-#         self._labels = None
-
-#         if download:
-#             self.download()
-
-#         if not self._check_integrity():
-#             raise RuntimeError('Omniglot integrity check failed')
-#         self._num_classes = len(self.labels)
-
-#     def __getitem__(self, index):
-
-
-#         return OmniglotDataset(index, data, character_name,
-#             transform=transform, target_transform=target_transform)
-
-
 @dataclass
 class InputExample:
     """
@@ -93,20 +38,18 @@ class InputExample:
     labels: Optional[List[str]]
 
 
+@dataclass
+class InputFeatures:
+    """
+    A single set of features of data.
+    Property names are the same names as the corresponding inputs to a model.
+    """
 
-# @dataclass
-# class InputFeatures:
-#     """
-#     A single set of features of data.
-#     Property names are the same names as the corresponding inputs to a model.
-#     """
+    input_ids: List[int]
+    attention_mask: List[int]
+    token_type_ids: Optional[List[int]] = None
+    label_ids: Optional[List[int]] = None
 
-#     input_ids: List[int]
-#     attention_mask: List[int]
-#     token_type_ids: Optional[List[int]] = None
-#     label_ids: Optional[List[int]] = None
-
-#InputFeatures = {}
 
 class Split(Enum):
     train = "train"
@@ -115,14 +58,13 @@ class Split(Enum):
 
 
 class PosDataset(Dataset):
-    features: List[dict]
+    features: List[InputFeatures]
     pad_token_label_id: int = nn.CrossEntropyLoss().ignore_index
     # Use cross entropy ignore_index as padding label id so that only
     # real label ids contribute to the loss later.
 
     def __init__(
         self,
-        class_index: int,
         data_dir: str,
         labels: list,
         tokenizer: PreTrainedTokenizer,
@@ -130,7 +72,6 @@ class PosDataset(Dataset):
         max_seq_length: Optional[int] = None,
         overwrite_cache=True,
         mode: Split = Split.train,
-
     ):
         # Load data features from cache or dataset file
         cached_features_file = os.path.join(
@@ -152,9 +93,9 @@ class PosDataset(Dataset):
                 examples, _ = read_examples_from_file(
                     data_dir,
                     mode,
-                    max_seq_length - tokenizer.num_special_tokens_to_add()
+                    max_seq_length - tokenizer.num_special_tokens_to_add(),
                 )
-                self.class_index = class_index
+
                 self.features = convert_examples_to_features(
                     examples,
                     labels,
@@ -176,8 +117,8 @@ class PosDataset(Dataset):
     def __len__(self):
         return len(self.features)
 
-    def __getitem__(self, i):
-        return (self.features[i], self.class_index)
+    def __getitem__(self, i) -> InputFeatures:
+        return self.features[i]
 
 
 def read_examples_from_file(
@@ -226,7 +167,7 @@ def convert_examples_to_features(
     pad_token_label_id=-100,
     sequence_a_segment_id=0,
     mask_padding_with_zero=True,
-):
+) -> List[InputFeatures]:
     """ Loads a data file into a list of `InputFeatures`
         `cls_token_at_end` define the location of the CLS token:
             - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
@@ -239,6 +180,7 @@ def convert_examples_to_features(
     for (ex_index, example) in enumerate(examples):
         if ex_index % 10_000 == 0:
             logger.info("Writing example %d of %d", ex_index, len(examples))
+
         tokens = []
         label_ids = []
         for word, label in zip(example.words, example.labels):
@@ -323,29 +265,26 @@ def convert_examples_to_features(
         assert len(segment_ids) == max_seq_length
         assert len(label_ids) == max_seq_length
 
-        # if ex_index < 5:
-        #     logger.info("*** Example ***")
-        #     logger.info("guid: %s", example.guid)
-        #     logger.info("tokens: %s", " ".join([str(x) for x in tokens]))
-        #     logger.info("input_ids: %s", " ".join([str(x) for x in input_ids]))
-        #     logger.info("input_mask: %s", " ".join([str(x) for x in input_mask]))
-        #     logger.info("segment_ids: %s", " ".join([str(x) for x in segment_ids]))
-        #     logger.info("label_ids: %s", " ".join([str(x) for x in label_ids]))
+        if ex_index < 5:
+            logger.info("*** Example ***")
+            logger.info("guid: %s", example.guid)
+            logger.info("tokens: %s", " ".join([str(x) for x in tokens]))
+            logger.info("input_ids: %s", " ".join([str(x) for x in input_ids]))
+            logger.info("input_mask: %s", " ".join([str(x) for x in input_mask]))
+            logger.info("segment_ids: %s", " ".join([str(x) for x in segment_ids]))
+            logger.info("label_ids: %s", " ".join([str(x) for x in label_ids]))
 
         if "token_type_ids" not in tokenizer.model_input_names:
             segment_ids = None
 
-        # feature['input_ids'] = input_ids
-        # feature['attention_mask'] = input_mask
-        # feature['token_type_ids'] = segment_ids
-        # feature['label_ids'] = label_ids
-
-        input_ids_str = ' '.join(map(str, input_ids))
-        input_mask_str = ' '.join(map(str, input_mask))
-        token_type_ids_str = ' '.join(map(str, segment_ids))
-        label_ids_str = ' '.join(map(str, label_ids))
-
-        features.append((input_ids_str, input_mask_str, token_type_ids_str, label_ids_str))
+        features.append(
+            InputFeatures(
+                input_ids=input_ids,
+                attention_mask=input_mask,
+                token_type_ids=segment_ids,
+                label_ids=label_ids,
+            )
+        )
     return features
 
 
