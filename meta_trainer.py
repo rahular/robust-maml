@@ -292,7 +292,7 @@ if __name__ == "__main__":
             # Compute validation loss / query loss
             dev_error = compute_loss(dev_task, bert_model, learner, batch_size=task_bs)
             dev_iteration_error += dev_error
-            # print("Dev_Error:", dev_error)
+            #print("Dev_Error:", dev_error)
             train_iteration_error += train_error
 
         # average the validation and train loss over all tasks
