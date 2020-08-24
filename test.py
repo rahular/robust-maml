@@ -217,9 +217,10 @@ if __name__ == "__main__":
     bert_model = bert_model.to(DEVICE)
 
     postagger = Classifier(len(labels[0]), model_config["hidden_dropout_prob"], bert_model.get_hidden_size())
-    postagger.load_state_dict(
-        torch.load(os.path.join(get_model_load_path(), "best_model.th"))
-    )
+    if model_config["is_load"]:
+        postagger.load_state_dict(
+            torch.load(os.path.join(get_model_load_path(), "best_model.th"))
+        )
     postagger.to(DEVICE)
 
     num_episodes = model_config["num_episodes"]
