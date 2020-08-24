@@ -237,5 +237,5 @@ if __name__ == "__main__":
     data_error = evaluate(data_gen, meta_model, bert_model, task_bs, inner_loop_steps, inner_lr, num_episodes)
 
     logger.info(
-            f"Finished iteration {iteration+1} with Avg. Loss: {data_error}"
+            f"Avg. Data Loss: {data_error}"
         )
