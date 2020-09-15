@@ -11,34 +11,44 @@ def get_model_config():
         return json.load(f)
 
 
-class PosTagger(nn.Module):
-    def __init__(self, model_type, num_labels, hidden_dropout_prob):
-        super(PosTagger, self).__init__()
-        self.model_type = model_type
-        self.num_labels = num_labels
-
+class BERT(nn.Module):
+    def __init__(self, model_type):
+        super(BERT, self).__init__()
         self.bert = BertModel.from_pretrained(model_type)
+
+    def get_hidden_size(self):
+        return self.bert.config.hidden_size
+
+    def forward(
+        self, input_ids=None, attention_mask=None, token_type_ids=None,
+    ):
+        outputs = self.bert(
+            input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids,
+        )
+        return outputs
+
+
+class Classifier(nn.Module):
+    def __init__(self, num_labels, hidden_dropout_prob, bert_hidden_size):
+        super(Classifier, self).__init__()
+        self.num_labels = num_labels
         self.classifier = nn.Sequential(
             nn.Dropout(hidden_dropout_prob),
-            nn.Linear(self.bert.config.hidden_size, 1024),
+            nn.Linear(bert_hidden_size, 1024),
             nn.Dropout(hidden_dropout_prob),
             nn.ReLU(),
             nn.Linear(1024, num_labels),
         )
 
     def forward(
-        self, input_ids=None, attention_mask=None, token_type_ids=None, labels=None,
+        self, outputs, labels=None, attention_mask=None,
     ):
-        outputs = self.bert(
-            input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids,
-        )
-
         sequence_output = outputs[0]
         logits = self.classifier(sequence_output)
 
-        outputs = (logits,) + outputs[
-            2:
-        ]  # add hidden states and attention if they are here
+        # add hidden states and attention if they are here
+        outputs = (logits,) + outputs[2:]
+
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             # Only keep active parts of the loss
@@ -56,3 +66,21 @@ class PosTagger(nn.Module):
             outputs = (loss,) + outputs
 
         return outputs  # (loss), scores, (hidden_states), (attentions)
+
+
+class PosTagger(nn.Module):
+    def __init__(self, model_type, num_labels, hidden_dropout_prob):
+        super(PosTagger, self).__init__()
+        self.bert = BERT(model_type)
+        self.classifier = Classifier(
+            num_labels, hidden_dropout_prob, self.bert.get_hidden_size()
+        )
+
+    def forward(
+        self, input_ids=None, attention_mask=None, token_type_ids=None, labels=None,
+    ):
+        return self.classifier(
+            self.bert(
+                input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids,
+            ), labels, attention_mask
+        )

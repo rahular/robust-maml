@@ -38,19 +38,6 @@ class InputExample:
     labels: Optional[List[str]]
 
 
-@dataclass
-class InputFeatures:
-    """
-    A single set of features of data.
-    Property names are the same names as the corresponding inputs to a model.
-    """
-
-    input_ids: List[int]
-    attention_mask: List[int]
-    token_type_ids: Optional[List[int]] = None
-    label_ids: Optional[List[int]] = None
-
-
 class Split(Enum):
     train = "train"
     dev = "dev"
@@ -58,13 +45,14 @@ class Split(Enum):
 
 
 class PosDataset(Dataset):
-    features: List[InputFeatures]
+    features: List[dict]
     pad_token_label_id: int = nn.CrossEntropyLoss().ignore_index
     # Use cross entropy ignore_index as padding label id so that only
     # real label ids contribute to the loss later.
 
     def __init__(
         self,
+        class_index: int,
         data_dir: str,
         labels: list,
         tokenizer: PreTrainedTokenizer,
@@ -76,9 +64,7 @@ class PosDataset(Dataset):
         # Load data features from cache or dataset file
         cached_features_file = os.path.join(
             data_dir,
-            "cached_{}_{}_{}".format(
-                mode.value, model_type, str(max_seq_length)
-            ),
+            "cached_{}_{}_{}".format(mode.value, model_type, str(max_seq_length)),
         )
 
         # Make sure only the first process in distributed training processes the dataset,
@@ -95,7 +81,7 @@ class PosDataset(Dataset):
                     mode,
                     max_seq_length - tokenizer.num_special_tokens_to_add(),
                 )
-
+                self.class_index = class_index
                 self.features = convert_examples_to_features(
                     examples,
                     labels,
@@ -117,8 +103,8 @@ class PosDataset(Dataset):
     def __len__(self):
         return len(self.features)
 
-    def __getitem__(self, i) -> InputFeatures:
-        return self.features[i]
+    def __getitem__(self, i):
+        return (self.features[i], self.class_index)
 
 
 def read_examples_from_file(
@@ -167,7 +153,7 @@ def convert_examples_to_features(
     pad_token_label_id=-100,
     sequence_a_segment_id=0,
     mask_padding_with_zero=True,
-) -> List[InputFeatures]:
+):
     """ Loads a data file into a list of `InputFeatures`
         `cls_token_at_end` define the location of the CLS token:
             - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
@@ -180,7 +166,6 @@ def convert_examples_to_features(
     for (ex_index, example) in enumerate(examples):
         if ex_index % 10_000 == 0:
             logger.info("Writing example %d of %d", ex_index, len(examples))
-
         tokens = []
         label_ids = []
         for word, label in zip(example.words, example.labels):
@@ -191,12 +176,6 @@ def convert_examples_to_features(
                 # Use the last wordpiece only
                 tokens.append(word_tokens[-1])
                 label_ids.append(label_map[label])
-                # Use the real label id for the first token of the word, and padding ids for the remaining tokens
-                # tokens.extend(word_tokens)
-                # label_ids.extend(
-                #     [label_map[label]] + [pad_token_label_id] * (len(word_tokens) - 1)
-                # )
-                
 
         # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
         special_tokens_count = tokenizer.num_special_tokens_to_add()
@@ -265,43 +244,18 @@ def convert_examples_to_features(
         assert len(segment_ids) == max_seq_length
         assert len(label_ids) == max_seq_length
 
-        if ex_index < 5:
-            logger.info("*** Example ***")
-            logger.info("guid: %s", example.guid)
-            logger.info("tokens: %s", " ".join([str(x) for x in tokens]))
-            logger.info("input_ids: %s", " ".join([str(x) for x in input_ids]))
-            logger.info("input_mask: %s", " ".join([str(x) for x in input_mask]))
-            logger.info("segment_ids: %s", " ".join([str(x) for x in segment_ids]))
-            logger.info("label_ids: %s", " ".join([str(x) for x in label_ids]))
-
         if "token_type_ids" not in tokenizer.model_input_names:
             segment_ids = None
 
+        input_ids_str = " ".join(map(str, input_ids))
+        input_mask_str = " ".join(map(str, input_mask))
+        token_type_ids_str = " ".join(map(str, segment_ids))
+        label_ids_str = " ".join(map(str, label_ids))
+
         features.append(
-            InputFeatures(
-                input_ids=input_ids,
-                attention_mask=input_mask,
-                token_type_ids=segment_ids,
-                label_ids=label_ids,
-            )
+            (input_ids_str, input_mask_str, token_type_ids_str, label_ids_str)
         )
     return features
-
-
-# def write_labels(data_dir):
-#     _, labels = read_examples_from_file(data_dir, Split.train, 128)
-#     with open(os.path.join(data_dir, "labels.txt"), "w") as f:
-#         f.write("\n".join(labels) + "\n")
-#     return labels
-
-
-# def get_labels(data_dir):
-#     labels_path = os.path.join(data_dir, "labels.txt")
-#     if not os.path.isfile(labels_path):
-#         return write_labels(data_dir)
-#     with open(labels_path, "r") as f:
-#         labels = f.read().splitlines()
-#         return labels
 
 
 def get_data_config():
