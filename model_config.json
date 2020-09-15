@@ -2,7 +2,7 @@
     "model_type": "bert-base-multilingual-cased",
     "max_seq_length": 128,
     "weight_decay": 0.1,
-    "batch_size": 32,
+    "batch_size": 128,
     "num_epochs": 500,
     "patience": 10,
     "num_warmup_steps": 100,
@@ -14,10 +14,9 @@
     "is_load": true,
     "outer_lr": 0.0005,
     "inner_lr": 0.1,
-    "task_batch_size":20,
+    "task_batch_size": 20,
     "num_episodes": 32,
-    "inner_loop_steps": 3,
+    "inner_loop_steps": 2,
     "ways": 2,
     "shots": 50
-
 }

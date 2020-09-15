@@ -16,7 +16,7 @@ from transformers.data.data_collator import DefaultDataCollator
 
 from typing import Dict, NamedTuple, Optional
 from seqeval.metrics import f1_score, precision_score, recall_score
-from data_utils_orig import PosDataset, Split, get_data_config, get_labels
+from data_utils import PosDataset, Split, get_data_config, read_examples_from_file
 from simple_tagger import PosTagger, get_model_config
 
 logging.basicConfig(
@@ -79,9 +79,9 @@ def _training_step(model, inputs, optimizer):
     return loss.item()
 
 
-def compute_metrics(p):
+def compute_metrics(p, label_map):
     predictions, label_ids = p.predictions, p.label_ids
-    preds = np.argmax(predictions, axis=2)
+    preds = np.argmax(predictions, axis=-1)
     batch_size, seq_len = preds.shape
 
     out_label_list = [[] for _ in range(batch_size)]
@@ -141,7 +141,7 @@ def _prediction_loop(model, dataloader, description):
 
     if preds is not None and label_ids is not None:
         metrics = compute_metrics(
-            EvalPrediction(predictions=preds, label_ids=label_ids)
+            EvalPrediction(predictions=preds, label_ids=label_ids), label_map
         )
     else:
         metrics = {}
@@ -205,7 +205,7 @@ def init_args():
     parser = argparse.ArgumentParser(
         description="Train POS tagging on various UD datasets"
     )
-    parser.add_argument("dataset", help="Dataset to train on")
+    parser.add_argument("--dataset", help="Dataset to train on")
     return parser.parse_args()
 
 
@@ -220,7 +220,8 @@ if __name__ == "__main__":
     np.random.seed(model_config["seed"])
 
     tokenizer = AutoTokenizer.from_pretrained(model_config["model_type"])
-    labels = get_labels(dataset_path)
+    _, labels = read_examples_from_file(dataset_path, Split.train, model_config["max_seq_length"])
+    labels = sorted(labels)
 
     # load datasets
     train_dataset = PosDataset(

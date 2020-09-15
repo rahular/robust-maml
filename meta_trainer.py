@@ -17,7 +17,7 @@ from transformers.data.data_collator import DefaultDataCollator
 
 from typing import Dict, NamedTuple, Optional
 from seqeval.metrics import f1_score, precision_score, recall_score
-from data_utils import PosDataset, Split, get_data_config, get_labels
+from meta_data_utils import PosDataset, Split, get_data_config, read_examples_from_file
 from simple_tagger import BERT, Classifier, get_model_config
 
 import learn2learn as l2l
@@ -84,21 +84,23 @@ def compute_loss(task, bert_model, learner, batch_size):
         # print("Class_Index:", class_index)
         with torch.no_grad():
             bert_output = bert_model(input_ids, attention_mask, token_type_ids)
-        #bert_output = bert_output.to(DEVICE)
         output = learner(bert_output, labels=labels, attention_mask=attention_mask)
-        # TODO: confirm that this loss is the mean across all elements of the batch
         curr_loss = output[0]
         loss += curr_loss
 
-    loss /= (batch + 1)
+    loss /= batch + 1
     return loss
 
 
 def get_model_save_path():
     return os.path.join(
         model_config["output_dir"],
-        "posbert_i_{}_o_{}_s_{}_d_{}".format(model_config["inner_lr"], model_config["outer_lr"], model_config["shots"],
-            args.datasets),
+        "posbert_i_{}_o_{}_s_{}_d_{}".format(
+            model_config["inner_lr"],
+            model_config["outer_lr"],
+            model_config["shots"],
+            args.datasets,
+        ),
     )
 
 
@@ -110,9 +112,7 @@ def save(model, optimizer, last_epoch):
     with open(os.path.join(save_dir, "model_config.json"), "w") as f:
         f.write(json.dumps(model_config, indent=2))
     # save model weigths
-    #print(model.state_dict().keys())
-    model_to_save = model.module if hasattr(model, 'module') else model
-    #print(model_to_save.state_dict().keys())
+    model_to_save = model.module if hasattr(model, "module") else model
     torch.save(model_to_save.state_dict(), os.path.join(save_dir, "best_model.th"))
     # save training state if required
     torch.save(
@@ -147,23 +147,25 @@ if __name__ == "__main__":
 
     tokenizer = AutoTokenizer.from_pretrained(model_config["model_type"])
 
-    labels = []
+    labels = set()
     train_datasets = []
     test_datasets = []
     dev_datasets = []
 
     class_index = 0
 
+    # build label set for all datasets
+    for dataset_path in dataset_paths:
+        _, l = read_examples_from_file(dataset_path, Split.train, model_config["max_seq_length"])
+        labels.update(l)
+    labels = sorted(list(labels))
+
     # load individual datasets
     for dataset_path in dataset_paths:
-        label = get_labels(dataset_path)
-        labels.append(label)
-
-        # load datasets
         train_dataset = PosDataset(
             class_index,
             dataset_path,
-            label,
+            labels,
             tokenizer,
             model_config["model_type"],
             model_config["max_seq_length"],
@@ -174,25 +176,23 @@ if __name__ == "__main__":
         dev_dataset = PosDataset(
             class_index,
             dataset_path,
-            label,
+            labels,
             tokenizer,
             model_config["model_type"],
             model_config["max_seq_length"],
             mode=Split.dev,
         )
-
         dev_datasets.append(dev_dataset)
 
         test_dataset = PosDataset(
             class_index,
             dataset_path,
-            label,
+            labels,
             tokenizer,
             model_config["model_type"],
             model_config["max_seq_length"],
             mode=Split.test,
         )
-
         test_datasets.append(test_dataset)
         class_index += 1
 
@@ -217,7 +217,6 @@ if __name__ == "__main__":
         task_transforms=[
             l2l.data.transforms.FusedNWaysKShots(train_dataset, n=ways, k=shots),
             l2l.data.transforms.LoadData(train_dataset),
-            # l2l.data.transforms.RemapLabels(train_dataset)
         ],
     )
 
@@ -227,7 +226,6 @@ if __name__ == "__main__":
         task_transforms=[
             l2l.data.transforms.FusedNWaysKShots(dev_dataset, n=ways, k=shots),
             l2l.data.transforms.LoadData(dev_dataset),
-            # l2l.data.transforms.RemapLabels(train_dataset)
         ],
     )
 
@@ -237,7 +235,6 @@ if __name__ == "__main__":
         task_transforms=[
             l2l.data.transforms.FusedNWaysKShots(test_dataset, n=ways, k=shots),
             l2l.data.transforms.LoadData(test_dataset),
-            # l2l.data.transforms.RemapLabels(train_dataset)
         ],
     )
 
@@ -249,7 +246,11 @@ if __name__ == "__main__":
     bert_model.eval()
     bert_model = bert_model.to(DEVICE)
 
-    postagger = Classifier(len(labels[0]), model_config["hidden_dropout_prob"], bert_model.get_hidden_size())
+    postagger = Classifier(
+        len(labels),
+        model_config["hidden_dropout_prob"],
+        bert_model.get_hidden_size(),
+    )
     postagger.to(DEVICE)
 
     num_epochs = model_config["num_epochs"]
@@ -271,7 +272,6 @@ if __name__ == "__main__":
         dev_iteration_error = 0.0
         train_iteration_error = 0.0
         for episode in range(num_episodes):  # episode loop = task loop
-            # print("Episode:", episode)
             # clone the meta model for use in inner loop. Back-propagating losses on the cloned module will populate the
             # buffers of the original module
             learner = meta_model.clone()
@@ -280,7 +280,6 @@ if __name__ == "__main__":
 
             # Inner Loop
             for step in range(inner_loop_steps):  # inner loop
-                # print("Step:", step)
                 train_error = compute_loss(
                     train_task, bert_model, learner, batch_size=task_bs
                 )
@@ -291,12 +290,10 @@ if __name__ == "__main__":
                     allow_unused=True,
                 )
                 l2l.algorithms.maml_update(learner, model_config["inner_lr"], grads)
-                # print("Train Error:", train_error)
 
             # Compute validation loss / query loss
             dev_error = compute_loss(dev_task, bert_model, learner, batch_size=task_bs)
             dev_iteration_error += dev_error
-            #print("Dev_Error:", dev_error)
             train_iteration_error += train_error
 
         # average the validation and train loss over all tasks
