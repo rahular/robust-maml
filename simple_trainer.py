@@ -7,7 +7,7 @@ import torch.nn as nn
 import numpy as np
 
 from tqdm import tqdm
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 from torch.utils.data.sampler import RandomSampler, SequentialSampler
 from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoTokenizer
@@ -164,7 +164,7 @@ def evaluate(loader):
 def get_model_save_path():
     return os.path.join(
         model_config["output_dir"],
-        "{}_{}".format(model_config["model_type"], args.dataset),
+        "{}_{}".format(model_config["model_type"], "-".join(args.datasets)),
     )
 
 
@@ -205,7 +205,9 @@ def init_args():
     parser = argparse.ArgumentParser(
         description="Train POS tagging on various UD datasets"
     )
-    parser.add_argument("--dataset", help="Dataset to train on")
+    parser.add_argument(
+        "datasets", metavar="datasets", type=str, nargs="+", help="Datasets to train on"
+    )
     return parser.parse_args()
 
 
@@ -213,60 +215,74 @@ if __name__ == "__main__":
     args = init_args()
     data_config = get_data_config()
     model_config = get_model_config()
-    dataset_path = data_config[f"{args.dataset}_path"]
+
+    dataset_paths = []
+    for dataset in args.datasets:
+        dataset_paths.append(data_config[f"{dataset}_path"])
 
     # for reproducibility
     torch.manual_seed(model_config["seed"])
     np.random.seed(model_config["seed"])
 
     tokenizer = AutoTokenizer.from_pretrained(model_config["model_type"])
-    _, labels = read_examples_from_file(dataset_path, Split.train, model_config["max_seq_length"])
-    labels = sorted(labels)
 
-    # load datasets
-    train_dataset = PosDataset(
-        dataset_path,
-        labels,
-        tokenizer,
-        model_config["model_type"],
-        model_config["max_seq_length"],
-        mode=Split.train,
-    )
-    dev_dataset = PosDataset(
-        dataset_path,
-        labels,
-        tokenizer,
-        model_config["model_type"],
-        model_config["max_seq_length"],
-        mode=Split.dev,
-    )
-    test_dataset = PosDataset(
-        dataset_path,
-        labels,
-        tokenizer,
-        model_config["model_type"],
-        model_config["max_seq_length"],
-        mode=Split.test,
-    )
+    # create a universal label set from the training files of all datasets
+    labels = set()
+    for dataset_path in dataset_paths:
+        _, l = read_examples_from_file(
+            dataset_path, Split.train, model_config["max_seq_length"]
+        )
+        labels.update(l)
+    labels = sorted(list(labels))
+
+    # read data splits
+    train_datasets, dev_datasets, test_datasets = [], [], []
+    for dataset_path in dataset_paths:
+        train_datasets.append(
+            PosDataset(
+                dataset_path,
+                labels,
+                tokenizer,
+                model_config["model_type"],
+                model_config["max_seq_length"],
+                mode=Split.train,
+            )
+        )
+        dev_datasets.append(
+            PosDataset(
+                dataset_path,
+                labels,
+                tokenizer,
+                model_config["model_type"],
+                model_config["max_seq_length"],
+                mode=Split.dev,
+            )
+        )
+        test_datasets.append(
+            PosDataset(
+                dataset_path,
+                labels,
+                tokenizer,
+                model_config["model_type"],
+                model_config["max_seq_length"],
+                mode=Split.test,
+            )
+        )
+    train_datasets = ConcatDataset(train_datasets)
+    dev_datasets = ConcatDataset(dev_datasets)
 
     # create dataloaders
     batch_size = model_config["batch_size"]
     train_loader = DataLoader(
-        train_dataset,
+        train_datasets,
         batch_size=batch_size,
-        sampler=RandomSampler(train_dataset),
+        sampler=RandomSampler(train_datasets),
         collate_fn=DefaultDataCollator().collate_batch,
     )
     dev_loader = DataLoader(
-        dev_dataset,
+        dev_datasets,
         batch_size=batch_size,
-        sampler=SequentialSampler(dev_dataset),
-        collate_fn=DefaultDataCollator().collate_batch,
-    )
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        sampler=SequentialSampler(test_dataset),
+        sampler=SequentialSampler(dev_datasets),
         collate_fn=DefaultDataCollator().collate_batch,
     )
 
@@ -306,16 +322,12 @@ if __name__ == "__main__":
         logger.info(
             f"Finished epoch {epoch+1} with avg. training loss: {running_loss/len(inputs)}"
         )
-        train_metrics = evaluate(train_loader)
+        # train_metrics = evaluate(train_loader)
+        # write_tensorboard(train_metrics, epoch, "train")
         dev_metrics = evaluate(dev_loader)
-        write_tensorboard(train_metrics, epoch, "train")
         write_tensorboard(dev_metrics, epoch, "validation")
 
-        logger.info(
-            "Training f1: {}, Validation f1: {}".format(
-                train_metrics["eval_f1"], dev_metrics["eval_f1"]
-            )
-        )
+        logger.info("Validation f1: {}".format(dev_metrics["eval_f1"]))
 
         if dev_metrics["eval_f1"] > best_f1:
             logger.info("Found new best model!")
@@ -335,7 +347,16 @@ if __name__ == "__main__":
     model = model.to(DEVICE)
     train_metrics = evaluate(train_loader)
     dev_metrics = evaluate(dev_loader)
-    test_metrics = evaluate(test_loader)
+    test_metrics = []
+    for idx, test_data in enumerate(test_datasets):
+        logging.info("Testing on f{args.datasets[idx]}...")
+        test_loader = DataLoader(
+            test_data,
+            batch_size=batch_size,
+            sampler=RandomSampler(train_datasets),
+            collate_fn=DefaultDataCollator().collate_batch,
+        )
+        test_metrics[args.datasets[idx]] = evaluate(test_loader)
 
     # dump results to file and stdout
     final_result = json.dumps(
