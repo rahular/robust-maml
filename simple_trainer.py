@@ -7,6 +7,7 @@ import torch.nn as nn
 import numpy as np
 
 from tqdm import tqdm
+from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader, ConcatDataset
 from torch.utils.data.sampler import RandomSampler, SequentialSampler
 from torch.utils.tensorboard import SummaryWriter
@@ -72,10 +73,10 @@ def _training_step(model, inputs, optimizer):
     model.train()
     for k, v in inputs.items():
         inputs[k] = v.to(DEVICE)
-
-    outputs = model(**inputs)
+    with autocast():
+        outputs = model(**inputs)
     loss = outputs[0]
-    loss.backward()
+    grad_scaler.scale(loss).backward()
     return loss.item()
 
 
@@ -224,6 +225,9 @@ if __name__ == "__main__":
     torch.manual_seed(model_config["seed"])
     np.random.seed(model_config["seed"])
 
+    # for mixed precision training
+    grad_scaler = GradScaler()
+
     tokenizer = AutoTokenizer.from_pretrained(model_config["model_type"])
 
     # create a universal label set from the training files of all datasets
@@ -313,7 +317,8 @@ if __name__ == "__main__":
             torch.nn.utils.clip_grad_norm_(
                 model.parameters(), model_config["max_grad_norm"]
             )
-            optimizer.step()
+            grad_scaler.step(optimizer)
+            grad_scaler.update()
             scheduler.step()
             model.zero_grad()
             tb_writer.add_scalar(
@@ -347,13 +352,13 @@ if __name__ == "__main__":
     model = model.to(DEVICE)
     train_metrics = evaluate(train_loader)
     dev_metrics = evaluate(dev_loader)
-    test_metrics = []
+    test_metrics = {}
     for idx, test_data in enumerate(test_datasets):
-        logging.info("Testing on f{args.datasets[idx]}...")
+        logging.info("Testing on {}...".format(args.datasets[idx]))
         test_loader = DataLoader(
             test_data,
             batch_size=batch_size,
-            sampler=RandomSampler(train_datasets),
+            sampler=SequentialSampler(test_data),
             collate_fn=DefaultDataCollator().collate_batch,
         )
         test_metrics[args.datasets[idx]] = evaluate(test_loader)
@@ -364,7 +369,7 @@ if __name__ == "__main__":
             "train": train_metrics,
             "validation": dev_metrics,
             "test": test_metrics,
-            "num_epochs": epoch,
+            # "num_epochs": epoch,
         },
         indent=2,
     )

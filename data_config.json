@@ -1,4 +1,5 @@
 {
     "partut_path": "data/ud/ud-treebanks-v2.6/UD_English-ParTUT",
-    "ewt_path": "data/ud/ud-treebanks-v2.6/UD_English-EWT"
+    "ewt_path": "data/ud/ud-treebanks-v2.6/UD_English-EWT",
+    "hdtb_path": "data/ud/ud-treebanks-v2.6/UD_Hindi-HDTB"
 }
