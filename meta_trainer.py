@@ -3,6 +3,7 @@ import json
 import argparse
 import torch
 import logging
+import wandb
 import torch.nn as nn
 import numpy as np
 
@@ -10,7 +11,6 @@ from torch import optim
 from tqdm import tqdm
 from torch.utils.data import DataLoader, ConcatDataset
 from torch.utils.data.sampler import RandomSampler, SequentialSampler
-from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoTokenizer
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from transformers.data.data_collator import DefaultDataCollator
@@ -28,6 +28,7 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+wandb.init(project="nlp-meta-learning")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -66,7 +67,6 @@ def compute_loss(task, bert_model, learner, batch_size):
             _BatchedDataset(task), batch_size=batch_size, shuffle=True, num_workers=0
         )
     ):
-
         input_ids = torch.stack([str_to_tensor(x) for x in input_ids]).to(DEVICE)
         attention_mask = torch.stack([str_to_tensor(x) for x in attention_mask]).to(
             DEVICE
@@ -92,21 +92,8 @@ def compute_loss(task, bert_model, learner, batch_size):
     return loss
 
 
-def get_model_save_path():
-    return os.path.join(
-        model_config["output_dir"],
-        "posbert_i_{}_o_{}_s_{}_d_{}".format(
-            model_config["inner_lr"],
-            model_config["outer_lr"],
-            model_config["shots"],
-            args.datasets,
-        ),
-    )
-
-
 def save(model, optimizer, last_epoch):
-    save_dir = get_model_save_path()
-    os.makedirs(save_dir, exist_ok=True)
+    save_dir = wandb.run.dir
     logger.info("Saving model checkpoint to %s", save_dir)
     # save model config as well
     with open(os.path.join(save_dir, "model_config.json"), "w") as f:
@@ -116,7 +103,7 @@ def save(model, optimizer, last_epoch):
     torch.save(model_to_save.state_dict(), os.path.join(save_dir, "best_model.th"))
     # save training state if required
     torch.save(
-        {"optimizer": optimizer.state_dict(), "last_epoch": last_epoch,},
+        {"optimizer": optimizer.state_dict(), "last_epoch": last_epoch},
         os.path.join(save_dir, "optim.th"),
     )
 
@@ -125,7 +112,7 @@ def init_args():
     parser = argparse.ArgumentParser(
         description="Train POS tagging on various UD datasets"
     )
-    parser.add_argument("--datasets", help="Dataset to train on")
+    parser.add_argument("datasets", metavar="datasets", type=str, nargs="+", help="Datasets to meta-train on")
     return parser.parse_args()
 
 
@@ -134,8 +121,10 @@ if __name__ == "__main__":
     data_config = get_data_config()
     model_config = get_model_config()
 
-    datasets = args.datasets.split(",")
+    wandb.config.update(model_config)
+    wandb.config.update(args)
 
+    datasets = args.datasets
     dataset_paths = []
     for dataset in datasets:
         dataset_path = data_config[f"{dataset}_path"]
@@ -203,8 +192,8 @@ if __name__ == "__main__":
 
     # convert to metadataset which is suitable for sampling tasks in an episode
     train_dataset = l2l.data.MetaDataset(combined_train_dataset)
-    dev_dataset = l2l.data.MetaDataset(combined_train_dataset)
-    test_dataset = l2l.data.MetaDataset(combined_train_dataset)
+    dev_dataset = l2l.data.MetaDataset(combined_dev_dataset)
+    test_dataset = l2l.data.MetaDataset(combined_test_dataset)
 
     # shots = number of examples per task, ways = number of classes per task
     shots = model_config["shots"]
@@ -213,7 +202,7 @@ if __name__ == "__main__":
     # create task generators
     train_gen = l2l.data.TaskDataset(
         train_dataset,
-        num_tasks=20000,
+        num_tasks=model_config["num_tasks"],
         task_transforms=[
             l2l.data.transforms.FusedNWaysKShots(train_dataset, n=ways, k=shots),
             l2l.data.transforms.LoadData(train_dataset),
@@ -222,7 +211,7 @@ if __name__ == "__main__":
 
     dev_gen = l2l.data.TaskDataset(
         dev_dataset,
-        num_tasks=20000,
+        num_tasks=model_config["num_tasks"],
         task_transforms=[
             l2l.data.transforms.FusedNWaysKShots(dev_dataset, n=ways, k=shots),
             l2l.data.transforms.LoadData(dev_dataset),
@@ -231,15 +220,12 @@ if __name__ == "__main__":
 
     test_gen = l2l.data.TaskDataset(
         test_dataset,
-        num_tasks=20000,
+        num_tasks=model_config["num_tasks"],
         task_transforms=[
             l2l.data.transforms.FusedNWaysKShots(test_dataset, n=ways, k=shots),
             l2l.data.transforms.LoadData(test_dataset),
         ],
     )
-
-    # for tensorboard logging
-    tb_writer = SummaryWriter(os.path.join(get_model_save_path(), "logs"))
 
     # define the postagger model
     bert_model = BERT(model_config["model_type"])
@@ -251,6 +237,7 @@ if __name__ == "__main__":
         model_config["hidden_dropout_prob"],
         bert_model.get_hidden_size(),
     )
+    wandb.watch(postagger)
     postagger.to(DEVICE)
 
     num_epochs = model_config["num_epochs"]
@@ -302,8 +289,8 @@ if __name__ == "__main__":
         tqdm_bar.set_description(
             "Validation Loss : {:.3f}".format(dev_iteration_error.item())
         )
-        tb_writer.add_scalar("validation_loss", dev_iteration_error, iteration)
-        tb_writer.add_scalar("training loss", train_iteration_error, iteration)
+        wandb.log({"validation_loss": dev_iteration_error})
+        wandb.log({"training_loss": train_iteration_error})
 
         # Outer Loop
         opt.zero_grad()
@@ -331,3 +318,4 @@ if __name__ == "__main__":
                 logger.info("Ran out of patience. Stopping training early...")
                 break
     logger.info(f"Best validation loss = {best_dev_error}")
+    wandb.run.summary["best_validation_loss"] = best_dev_error

@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.sh
 logs/
+wandb/
 
 # C extensions
 *.so

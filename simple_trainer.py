@@ -3,6 +3,7 @@ import json
 import argparse
 import torch
 import logging
+import wandb
 import torch.nn as nn
 import numpy as np
 
@@ -10,7 +11,6 @@ from tqdm import tqdm
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader, ConcatDataset
 from torch.utils.data.sampler import RandomSampler, SequentialSampler
-from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoTokenizer
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from transformers.data.data_collator import DefaultDataCollator
@@ -26,6 +26,7 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+wandb.init(project="nlp-meta-learning")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -162,16 +163,8 @@ def evaluate(loader):
     return output.metrics
 
 
-def get_model_save_path():
-    return os.path.join(
-        model_config["output_dir"],
-        "{}_{}".format(model_config["model_type"], "-".join(args.datasets)),
-    )
-
-
 def save(model, optimizer, scheduler, last_epoch):
-    save_dir = get_model_save_path()
-    os.makedirs(save_dir, exist_ok=True)
+    save_dir = wandb.run.dir
     logger.info("Saving model checkpoint to %s", save_dir)
     # save model config as well
     with open(os.path.join(save_dir, "model_config.json"), "w") as f:
@@ -189,16 +182,16 @@ def save(model, optimizer, scheduler, last_epoch):
     )
 
 
-def write_tensorboard(metrics, epoch, name="train"):
-    tb_writer.add_scalar("loss/{}_loss".format(name), metrics["eval_loss"], epoch)
-    tb_writer.add_scalars(
-        "metrics/{}_prf".format(name),
+def write_logs(metrics, epoch, name="train"):
+    wandb.log({"loss/{}_loss".format(name): metrics["eval_loss"]})
+    wandb.log(
         {
-            "precision": metrics["eval_precision"],
-            "recall": metrics["eval_recall"],
-            "f1_score": metrics["eval_f1"],
-        },
-        epoch,
+            "metrics/{}_prf".format(name): {
+                "precision": metrics["eval_precision"],
+                "recall": metrics["eval_recall"],
+                "f1_score": metrics["eval_f1"],
+            }
+        }
     )
 
 
@@ -216,6 +209,9 @@ if __name__ == "__main__":
     args = init_args()
     data_config = get_data_config()
     model_config = get_model_config()
+
+    wandb.config.update(model_config)
+    wandb.config.update(vars(args))
 
     dataset_paths = []
     for dataset in args.datasets:
@@ -290,13 +286,11 @@ if __name__ == "__main__":
         collate_fn=DefaultDataCollator().collate_batch,
     )
 
-    # for tensorboard logging
-    tb_writer = SummaryWriter(os.path.join(get_model_save_path(), "logs"))
-
     label_map = {i: label for i, label in enumerate(labels)}
     model = PosTagger(
         model_config["model_type"], len(labels), model_config["hidden_dropout_prob"]
     )
+    wandb.watch(model)
     model = model.to(DEVICE)
 
     # create optimizer and lr_scheduler
@@ -321,16 +315,15 @@ if __name__ == "__main__":
             grad_scaler.update()
             scheduler.step()
             model.zero_grad()
-            tb_writer.add_scalar(
-                "loss/step_loss", step_loss, epoch * len(epoch_iterator) + training_step
-            )
         logger.info(
             f"Finished epoch {epoch+1} with avg. training loss: {running_loss/len(inputs)}"
         )
+        wandb.log({"loss/running_loss": running_loss / len(inputs)})
+
         # train_metrics = evaluate(train_loader)
-        # write_tensorboard(train_metrics, epoch, "train")
+        # write_logs(train_metrics, epoch, "train")
         dev_metrics = evaluate(dev_loader)
-        write_tensorboard(dev_metrics, epoch, "validation")
+        write_logs(dev_metrics, epoch, "validation")
 
         logger.info("Validation f1: {}".format(dev_metrics["eval_f1"]))
 
@@ -346,9 +339,7 @@ if __name__ == "__main__":
                 logger.info("Ran out of patience. Stopping training early...")
                 break
 
-    model.load_state_dict(
-        torch.load(os.path.join(get_model_save_path(), "best_model.th"))
-    )
+    model.load_state_dict(torch.load(os.path.join(wandb.run.dir, "best_model.th")))
     model = model.to(DEVICE)
     train_metrics = evaluate(train_loader)
     dev_metrics = evaluate(dev_loader)
@@ -364,16 +355,15 @@ if __name__ == "__main__":
         test_metrics[args.datasets[idx]] = evaluate(test_loader)
 
     # dump results to file and stdout
-    final_result = json.dumps(
-        {
-            "train": train_metrics,
-            "validation": dev_metrics,
-            "test": test_metrics,
-            # "num_epochs": epoch,
-        },
-        indent=2,
-    )
-    with open(os.path.join(get_model_save_path(), "result.json"), "w") as f:
+    final_result = {
+        "train": train_metrics,
+        "validation": dev_metrics,
+        "test": test_metrics,
+        # "num_epochs": epoch,
+    }
+    wandb.run.summary = final_result
+    final_result = json.dumps(final_result, indent=2)
+    with open(os.path.join(wandb.run.dir, "result.json"), "w") as f:
         f.write(final_result)
     logger.info(f"Final result: {final_result}")
 
