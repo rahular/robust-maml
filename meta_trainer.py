@@ -23,9 +23,7 @@ from simple_tagger import BERT, Classifier, get_model_config
 import learn2learn as l2l
 
 logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-    datefmt="%m/%d/%Y %H:%M:%S",
-    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 wandb.init(project="nlp-meta-learning")
@@ -59,21 +57,12 @@ def str_to_tensor(x):
 
 def compute_loss(task, bert_model, learner, batch_size):
     loss = 0.0
-    for (
-        batch,
-        (input_ids, attention_mask, token_type_ids, labels, class_index),
-    ) in enumerate(
-        torch.utils.data.DataLoader(
-            _BatchedDataset(task), batch_size=batch_size, shuffle=True, num_workers=0
-        )
+    for (batch, (input_ids, attention_mask, token_type_ids, labels, class_index),) in enumerate(
+        torch.utils.data.DataLoader(_BatchedDataset(task), batch_size=batch_size, shuffle=True, num_workers=0)
     ):
         input_ids = torch.stack([str_to_tensor(x) for x in input_ids]).to(DEVICE)
-        attention_mask = torch.stack([str_to_tensor(x) for x in attention_mask]).to(
-            DEVICE
-        )
-        token_type_ids = torch.stack([str_to_tensor(x) for x in token_type_ids]).to(
-            DEVICE
-        )
+        attention_mask = torch.stack([str_to_tensor(x) for x in attention_mask]).to(DEVICE)
+        token_type_ids = torch.stack([str_to_tensor(x) for x in token_type_ids]).to(DEVICE)
         labels = torch.stack([str_to_tensor(x) for x in labels]).to(DEVICE)
 
         # print("Batch:", batch)
@@ -103,15 +92,12 @@ def save(model, optimizer, last_epoch):
     torch.save(model_to_save.state_dict(), os.path.join(save_dir, "best_model.th"))
     # save training state if required
     torch.save(
-        {"optimizer": optimizer.state_dict(), "last_epoch": last_epoch},
-        os.path.join(save_dir, "optim.th"),
+        {"optimizer": optimizer.state_dict(), "last_epoch": last_epoch}, os.path.join(save_dir, "optim.th")
     )
 
 
 def init_args():
-    parser = argparse.ArgumentParser(
-        description="Train POS tagging on various UD datasets"
-    )
+    parser = argparse.ArgumentParser(description="Train POS tagging on various UD datasets")
     parser.add_argument("datasets", metavar="datasets", type=str, nargs="+", help="Datasets to meta-train on")
     return parser.parse_args()
 
@@ -138,10 +124,7 @@ if __name__ == "__main__":
 
     labels = set()
     train_datasets = []
-    test_datasets = []
     dev_datasets = []
-
-    class_index = 0
 
     # build label set for all datasets
     for dataset_path in dataset_paths:
@@ -150,7 +133,7 @@ if __name__ == "__main__":
     labels = sorted(list(labels))
 
     # load individual datasets
-    for dataset_path in dataset_paths:
+    for class_index, dataset_path in enumerate(dataset_paths):
         train_dataset = PosDataset(
             class_index,
             dataset_path,
@@ -173,27 +156,13 @@ if __name__ == "__main__":
         )
         dev_datasets.append(dev_dataset)
 
-        test_dataset = PosDataset(
-            class_index,
-            dataset_path,
-            labels,
-            tokenizer,
-            model_config["model_type"],
-            model_config["max_seq_length"],
-            mode=Split.test,
-        )
-        test_datasets.append(test_dataset)
-        class_index += 1
-
     # concatenate individual datasets into a single dataset
     combined_train_dataset = ConcatDataset(train_datasets)
     combined_dev_dataset = ConcatDataset(dev_datasets)
-    combined_test_dataset = ConcatDataset(test_datasets)
 
     # convert to metadataset which is suitable for sampling tasks in an episode
     train_dataset = l2l.data.MetaDataset(combined_train_dataset)
     dev_dataset = l2l.data.MetaDataset(combined_dev_dataset)
-    test_dataset = l2l.data.MetaDataset(combined_test_dataset)
 
     # shots = number of examples per task, ways = number of classes per task
     shots = model_config["shots"]
@@ -218,33 +187,18 @@ if __name__ == "__main__":
         ],
     )
 
-    test_gen = l2l.data.TaskDataset(
-        test_dataset,
-        num_tasks=model_config["num_tasks"],
-        task_transforms=[
-            l2l.data.transforms.FusedNWaysKShots(test_dataset, n=ways, k=shots),
-            l2l.data.transforms.LoadData(test_dataset),
-        ],
-    )
-
     # define the postagger model
     bert_model = BERT(model_config["model_type"])
     bert_model.eval()
     bert_model = bert_model.to(DEVICE)
 
-    postagger = Classifier(
-        len(labels),
-        model_config["hidden_dropout_prob"],
-        bert_model.get_hidden_size(),
-    )
+    postagger = Classifier(len(labels), model_config["hidden_dropout_prob"], bert_model.get_hidden_size())
     wandb.watch(postagger)
     postagger.to(DEVICE)
 
     num_epochs = model_config["num_epochs"]
     if model_config["is_fomaml"]:
-        meta_model = l2l.algorithms.MAML(
-            postagger, lr=model_config["inner_lr"], first_order=True
-        )
+        meta_model = l2l.algorithms.MAML(postagger, lr=model_config["inner_lr"], first_order=True)
     else:
         meta_model = l2l.algorithms.MAML(postagger, lr=model_config["inner_lr"])
     # outer loop optimizer
@@ -267,15 +221,8 @@ if __name__ == "__main__":
 
             # Inner Loop
             for step in range(inner_loop_steps):  # inner loop
-                train_error = compute_loss(
-                    train_task, bert_model, learner, batch_size=task_bs
-                )
-                grads = torch.autograd.grad(
-                    train_error,
-                    learner.parameters(),
-                    create_graph=True,
-                    allow_unused=True,
-                )
+                train_error = compute_loss(train_task, bert_model, learner, batch_size=task_bs)
+                grads = torch.autograd.grad(train_error, learner.parameters(), create_graph=True, allow_unused=True)
                 l2l.algorithms.maml_update(learner, model_config["inner_lr"], grads)
 
             # Compute validation loss / query loss
@@ -286,9 +233,7 @@ if __name__ == "__main__":
         # average the validation and train loss over all tasks
         dev_iteration_error /= num_episodes
         train_iteration_error /= num_episodes
-        tqdm_bar.set_description(
-            "Validation Loss : {:.3f}".format(dev_iteration_error.item())
-        )
+        tqdm_bar.set_description("Validation Loss : {:.3f}".format(dev_iteration_error.item()))
         wandb.log({"validation_loss": dev_iteration_error})
         wandb.log({"training_loss": train_iteration_error})
 
@@ -299,12 +244,8 @@ if __name__ == "__main__":
         opt.step()
         meta_model.zero_grad()
 
-        logger.info(
-            f"Finished iteration {iteration+1} with avg. training loss: {train_iteration_error}"
-        )
-        logger.info(
-            f"Finished iteration {iteration+1} with avg. validation loss: {dev_iteration_error}"
-        )
+        logger.info(f"Finished iteration {iteration+1} with avg. training loss: {train_iteration_error}")
+        logger.info(f"Finished iteration {iteration+1} with avg. validation loss: {dev_iteration_error}")
 
         if dev_iteration_error < best_dev_error:
             logger.info("Found new best model!")

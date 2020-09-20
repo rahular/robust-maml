@@ -11,7 +11,6 @@
     "hidden_dropout_prob": 0.2,
     "output_dir": "./models",
     "is_fomaml": true,
-    "is_load": true,
     "outer_lr": 0.0005,
     "inner_lr": 0.1,
     "num_tasks": 20000,

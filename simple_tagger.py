@@ -22,9 +22,7 @@ class BERT(nn.Module):
     def forward(
         self, input_ids=None, attention_mask=None, token_type_ids=None,
     ):
-        outputs = self.bert(
-            input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids,
-        )
+        outputs = self.bert(input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
         return outputs
 
 
@@ -56,9 +54,7 @@ class Classifier(nn.Module):
                 active_loss = attention_mask.view(-1) == 1
                 active_logits = logits.view(-1, self.num_labels)
                 active_labels = torch.where(
-                    active_loss,
-                    labels.view(-1),
-                    torch.tensor(loss_fct.ignore_index).type_as(labels),
+                    active_loss, labels.view(-1), torch.tensor(loss_fct.ignore_index).type_as(labels),
                 )
                 loss = loss_fct(active_logits, active_labels)
             else:
@@ -72,15 +68,11 @@ class PosTagger(nn.Module):
     def __init__(self, model_type, num_labels, hidden_dropout_prob):
         super(PosTagger, self).__init__()
         self.bert = BERT(model_type)
-        self.classifier = Classifier(
-            num_labels, hidden_dropout_prob, self.bert.get_hidden_size()
-        )
+        self.classifier = Classifier(num_labels, hidden_dropout_prob, self.bert.get_hidden_size())
 
     def forward(
         self, input_ids=None, attention_mask=None, token_type_ids=None, labels=None,
     ):
         return self.classifier(
-            self.bert(
-                input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids,
-            ), labels, attention_mask
+            self.bert(input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids), labels, attention_mask
         )

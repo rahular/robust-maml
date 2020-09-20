@@ -15,9 +15,7 @@ from torch.utils.data.dataset import Dataset
 from transformers import PreTrainedTokenizer, AutoTokenizer
 
 logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-    datefmt="%m/%d/%Y %H:%M:%S",
-    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -75,10 +73,7 @@ class PosDataset(Dataset):
     ):
         # Load data features from cache or dataset file
         cached_features_file = os.path.join(
-            data_dir,
-            "cached_{}_{}_{}".format(
-                mode.value, model_type, str(max_seq_length)
-            ),
+            data_dir, "cached_{}_{}_{}".format(mode.value, model_type, str(max_seq_length))
         )
 
         # Make sure only the first process in distributed training processes the dataset,
@@ -91,9 +86,7 @@ class PosDataset(Dataset):
             else:
                 logger.info(f"Creating features from dataset file at {data_dir}")
                 examples, _ = read_examples_from_file(
-                    data_dir,
-                    mode,
-                    max_seq_length - tokenizer.num_special_tokens_to_add(),
+                    data_dir, mode, max_seq_length - tokenizer.num_special_tokens_to_add()
                 )
 
                 self.features = convert_examples_to_features(
@@ -121,9 +114,7 @@ class PosDataset(Dataset):
         return self.features[i]
 
 
-def read_examples_from_file(
-    data_dir, mode: Union[Split, str], max_seq_length
-) -> List[InputExample]:
+def read_examples_from_file(data_dir, mode: Union[Split, str], max_seq_length) -> List[InputExample]:
     if isinstance(mode, Split):
         mode = mode.value
     file_path = os.path.join(data_dir, f"{mode}.conllu")
@@ -196,7 +187,6 @@ def convert_examples_to_features(
                 # label_ids.extend(
                 #     [label_map[label]] + [pad_token_label_id] * (len(word_tokens) - 1)
                 # )
-                
 
         # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
         special_tokens_count = tokenizer.num_special_tokens_to_add()
@@ -249,9 +239,7 @@ def convert_examples_to_features(
         padding_length = max_seq_length - len(input_ids)
         if pad_on_left:
             input_ids = ([pad_token] * padding_length) + input_ids
-            input_mask = (
-                [0 if mask_padding_with_zero else 1] * padding_length
-            ) + input_mask
+            input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
             segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
             label_ids = ([pad_token_label_id] * padding_length) + label_ids
         else:
@@ -279,10 +267,7 @@ def convert_examples_to_features(
 
         features.append(
             InputFeatures(
-                input_ids=input_ids,
-                attention_mask=input_mask,
-                token_type_ids=segment_ids,
-                label_ids=label_ids,
+                input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids, label_ids=label_ids
             )
         )
     return features

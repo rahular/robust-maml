@@ -21,9 +21,7 @@ from data_utils import PosDataset, Split, get_data_config, read_examples_from_fi
 from simple_tagger import PosTagger, get_model_config
 
 logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-    datefmt="%m/%d/%Y %H:%M:%S",
-    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 wandb.init(project="nlp-meta-learning")
@@ -45,27 +43,14 @@ def get_optimizers(model, num_warmup_steps, num_training_steps, lr=5e-5):
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
         {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if not any(nd in n for nd in no_decay)
-            ],
+            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
             "weight_decay": model_config["weight_decay"],
         },
-        {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if any(nd in n for nd in no_decay)
-            ],
-            "weight_decay": 0.0,
-        },
+        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0,},
     ]
     optimizer = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=lr)
     scheduler = get_linear_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=num_warmup_steps,
-        num_training_steps=num_training_steps,
+        optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps
     )
     return optimizer, scheduler
 
@@ -142,9 +127,7 @@ def _prediction_loop(model, dataloader, description):
         label_ids = label_ids.cpu().numpy()
 
     if preds is not None and label_ids is not None:
-        metrics = compute_metrics(
-            EvalPrediction(predictions=preds, label_ids=label_ids), label_map
-        )
+        metrics = compute_metrics(EvalPrediction(predictions=preds, label_ids=label_ids), label_map)
     else:
         metrics = {}
     if len(eval_losses) > 0:
@@ -173,35 +156,27 @@ def save(model, optimizer, scheduler, last_epoch):
     torch.save(model.state_dict(), os.path.join(save_dir, "best_model.th"))
     # save training state if required
     torch.save(
-        {
-            "optimizer": optimizer.state_dict(),
-            "lr_scheduler": scheduler.state_dict(),
-            "last_epoch": last_epoch,
-        },
+        {"optimizer": optimizer.state_dict(), "lr_scheduler": scheduler.state_dict(), "last_epoch": last_epoch},
         os.path.join(save_dir, "optim.th"),
     )
 
 
 def write_logs(metrics, epoch, name="train"):
-    wandb.log({"loss/{}_loss".format(name): metrics["eval_loss"]})
     wandb.log(
         {
+            "loss/{}_loss".format(name): metrics["eval_loss"],
             "metrics/{}_prf".format(name): {
                 "precision": metrics["eval_precision"],
                 "recall": metrics["eval_recall"],
                 "f1_score": metrics["eval_f1"],
-            }
+            },
         }
     )
 
 
 def init_args():
-    parser = argparse.ArgumentParser(
-        description="Train POS tagging on various UD datasets"
-    )
-    parser.add_argument(
-        "datasets", metavar="datasets", type=str, nargs="+", help="Datasets to train on"
-    )
+    parser = argparse.ArgumentParser(description="Train POS tagging on various UD datasets")
+    parser.add_argument("datasets", metavar="datasets", type=str, nargs="+", help="Datasets to train on")
     return parser.parse_args()
 
 
@@ -229,9 +204,7 @@ if __name__ == "__main__":
     # create a universal label set from the training files of all datasets
     labels = set()
     for dataset_path in dataset_paths:
-        _, l = read_examples_from_file(
-            dataset_path, Split.train, model_config["max_seq_length"]
-        )
+        _, l = read_examples_from_file(dataset_path, Split.train, model_config["max_seq_length"])
         labels.update(l)
     labels = sorted(list(labels))
 
@@ -287,18 +260,14 @@ if __name__ == "__main__":
     )
 
     label_map = {i: label for i, label in enumerate(labels)}
-    model = PosTagger(
-        model_config["model_type"], len(labels), model_config["hidden_dropout_prob"]
-    )
+    model = PosTagger(model_config["model_type"], len(labels), model_config["hidden_dropout_prob"])
     wandb.watch(model)
     model = model.to(DEVICE)
 
     # create optimizer and lr_scheduler
     num_epochs = model_config["num_epochs"]
     num_training_steps = len(train_loader) * num_epochs
-    optimizer, scheduler = get_optimizers(
-        model, model_config["num_warmup_steps"], num_training_steps
-    )
+    optimizer, scheduler = get_optimizers(model, model_config["num_warmup_steps"], num_training_steps)
 
     best_f1, patience_ctr = 0.0, 0
     best_state_dict = None
@@ -308,16 +277,12 @@ if __name__ == "__main__":
         for training_step, inputs in enumerate(epoch_iterator):
             step_loss = _training_step(model, inputs, optimizer)
             running_loss += step_loss
-            torch.nn.utils.clip_grad_norm_(
-                model.parameters(), model_config["max_grad_norm"]
-            )
+            torch.nn.utils.clip_grad_norm_(model.parameters(), model_config["max_grad_norm"])
             grad_scaler.step(optimizer)
             grad_scaler.update()
             scheduler.step()
             model.zero_grad()
-        logger.info(
-            f"Finished epoch {epoch+1} with avg. training loss: {running_loss/len(inputs)}"
-        )
+        logger.info(f"Finished epoch {epoch+1} with avg. training loss: {running_loss/len(inputs)}")
         wandb.log({"loss/running_loss": running_loss / len(inputs)})
 
         # train_metrics = evaluate(train_loader)
