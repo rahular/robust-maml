@@ -18,13 +18,12 @@ from transformers.data.data_collator import DefaultDataCollator
 from typing import Dict, NamedTuple, Optional
 from seqeval.metrics import f1_score, precision_score, recall_score
 from data_utils import PosDataset, Split, get_data_config, read_examples_from_file
-from simple_tagger import PosTagger, get_model_config
+from simple_tagger import BERT, Classifier, get_model_config
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-wandb.init(project="nlp-meta-learning")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -55,12 +54,15 @@ def get_optimizers(model, num_warmup_steps, num_training_steps, lr=5e-5):
     return optimizer, scheduler
 
 
-def _training_step(model, inputs, optimizer):
+def _training_step(bert, model, inputs, optimizer):
     model.train()
     for k, v in inputs.items():
         inputs[k] = v.to(DEVICE)
     with autocast():
-        outputs = model(**inputs)
+        # outputs = model(**inputs)
+        with torch.no_grad():
+            bert_output = bert(inputs["input_ids"], inputs["attention_mask"], inputs["token_type_ids"])
+        outputs = model(bert_output, labels=inputs["labels"], attention_mask=inputs["attention_mask"])
     loss = outputs[0]
     grad_scaler.scale(loss).backward()
     return loss.item()
@@ -87,7 +89,7 @@ def compute_metrics(p, label_map):
     }
 
 
-def _prediction_loop(model, dataloader, description):
+def _prediction_loop(bert, model, dataloader, label_map, description):
     batch_size = dataloader.batch_size
     logger.info("***** Running %s *****", description)
     logger.info("  Num examples = %d", len(dataloader.dataset))
@@ -103,7 +105,9 @@ def _prediction_loop(model, dataloader, description):
             inputs[k] = v.to(DEVICE)
 
         with torch.no_grad():
-            outputs = model(**inputs)
+            # outputs = model(**inputs)
+            bert_output = bert(inputs["input_ids"], inputs["attention_mask"], inputs["token_type_ids"])
+            outputs = model(bert_output, labels=inputs["labels"], attention_mask=inputs["attention_mask"])
             if has_labels:
                 step_eval_loss, logits = outputs[:2]
                 eval_losses += [step_eval_loss.mean().item()]
@@ -141,8 +145,8 @@ def _prediction_loop(model, dataloader, description):
     return PredictionOutput(predictions=preds, label_ids=label_ids, metrics=metrics)
 
 
-def evaluate(loader):
-    output = _prediction_loop(model, loader, description="Evaluation")
+def evaluate(loader, label_map, bert, model):
+    output = _prediction_loop(bert, model, loader, label_map, description="Evaluation")
     return output.metrics
 
 
@@ -185,6 +189,7 @@ if __name__ == "__main__":
     data_config = get_data_config()
     model_config = get_model_config()
 
+    wandb.init(project="nlp-meta-learning")
     wandb.config.update(model_config)
     wandb.config.update(vars(args))
 
@@ -260,7 +265,12 @@ if __name__ == "__main__":
     )
 
     label_map = {i: label for i, label in enumerate(labels)}
-    model = PosTagger(model_config["model_type"], len(labels), model_config["hidden_dropout_prob"])
+    # model = PosTagger(model_config["model_type"], len(labels), model_config["hidden_dropout_prob"])
+    bert = BERT(model_config["model_type"])
+    bert.eval()
+    bert = bert.to(DEVICE)
+    model = Classifier(len(labels), model_config["hidden_dropout_prob"], bert.get_hidden_size())
+
     wandb.watch(model)
     model = model.to(DEVICE)
 
@@ -275,7 +285,7 @@ if __name__ == "__main__":
         running_loss = 0.0
         epoch_iterator = tqdm(train_loader, desc="Training")
         for training_step, inputs in enumerate(epoch_iterator):
-            step_loss = _training_step(model, inputs, optimizer)
+            step_loss = _training_step(bert, model, inputs, optimizer)
             running_loss += step_loss
             torch.nn.utils.clip_grad_norm_(model.parameters(), model_config["max_grad_norm"])
             grad_scaler.step(optimizer)
@@ -285,9 +295,9 @@ if __name__ == "__main__":
         logger.info(f"Finished epoch {epoch+1} with avg. training loss: {running_loss/len(inputs)}")
         wandb.log({"loss/running_loss": running_loss / len(inputs)})
 
-        # train_metrics = evaluate(train_loader)
+        # train_metrics = evaluate(train_loader, label_map, bert, model)
         # write_logs(train_metrics, epoch, "train")
-        dev_metrics = evaluate(dev_loader)
+        dev_metrics = evaluate(dev_loader, label_map, bert, model)
         write_logs(dev_metrics, epoch, "validation")
 
         logger.info("Validation f1: {}".format(dev_metrics["eval_f1"]))
@@ -306,8 +316,8 @@ if __name__ == "__main__":
 
     model.load_state_dict(torch.load(os.path.join(wandb.run.dir, "best_model.th")))
     model = model.to(DEVICE)
-    train_metrics = evaluate(train_loader)
-    dev_metrics = evaluate(dev_loader)
+    train_metrics = evaluate(train_loader, label_map, bert, model)
+    dev_metrics = evaluate(dev_loader, label_map, bert, model)
     test_metrics = {}
     for idx, test_data in enumerate(test_datasets):
         logging.info("Testing on {}...".format(args.datasets[idx]))
@@ -317,7 +327,7 @@ if __name__ == "__main__":
             sampler=SequentialSampler(test_data),
             collate_fn=DefaultDataCollator().collate_batch,
         )
-        test_metrics[args.datasets[idx]] = evaluate(test_loader)
+        test_metrics[args.datasets[idx]] = evaluate(test_loader, label_map, bert, model)
 
     # dump results to file and stdout
     final_result = {
@@ -326,7 +336,7 @@ if __name__ == "__main__":
         "test": test_metrics,
         # "num_epochs": epoch,
     }
-    wandb.run.summary = final_result
+    wandb.run.summary["final_results"] = final_result
     final_result = json.dumps(final_result, indent=2)
     with open(os.path.join(wandb.run.dir, "result.json"), "w") as f:
         f.write(final_result)

@@ -3,7 +3,8 @@ import json
 import argparse
 import torch
 import logging
-import wandb
+
+# import wandb
 import statistics as stat
 import torch.nn as nn
 import numpy as np
@@ -19,9 +20,12 @@ from transformers.data.data_collator import DefaultDataCollator
 
 from typing import Dict, NamedTuple, Optional
 from seqeval.metrics import f1_score, precision_score, recall_score
-from meta_data_utils import PosDataset, Split, get_data_config, read_examples_from_file
+from data_utils import PosDataset as RegularPosDataset
+from meta_data_utils import PosDataset as MetaPosDataset
+from meta_data_utils import Split, get_data_config, read_examples_from_file
 from simple_tagger import BERT, Classifier, get_model_config
 from simple_trainer import compute_metrics, EvalPrediction
+from simple_trainer import evaluate as regular_evaluate
 
 import learn2learn as l2l
 
@@ -29,7 +33,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-wandb.init(project="nlp-meta-learning")
+# wandb.init(project="nlp-meta-learning")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -101,7 +105,36 @@ def compute_loss(task, bert_model, learner, batch_size):
     return loss / (iters + 1), metrics
 
 
-def evaluate(data_gen, meta_model, bert_model, task_bs, inner_loop_steps, inner_lr, num_episodes):
+def meta_evaluate(datsets, bert_model, postagger):
+    # concatenate individual datasets into a single dataset
+    combined_dataset = ConcatDataset(datasets)
+
+    # convert to metadataset which is suitable for sampling tasks in an episode
+    meta_dataset = l2l.data.MetaDataset(combined_dataset)
+
+    # shots = number of examples per task, ways = number of classes per task
+    shots = model_config["shots"]
+    ways = model_config["ways"]
+
+    # create task generators
+    data_gen = l2l.data.TaskDataset(
+        meta_dataset,
+        num_tasks=model_config["num_tasks"],
+        task_transforms=[
+            l2l.data.transforms.FusedNWaysKShots(meta_dataset, n=ways, k=shots),
+            l2l.data.transforms.LoadData(meta_dataset),
+        ],
+    )
+    num_episodes = model_config["num_episodes"]
+    task_bs = model_config["task_batch_size"]
+    inner_loop_steps = model_config["inner_loop_steps"]
+    inner_lr = model_config["inner_lr"]
+
+    if model_config["is_fomaml"]:
+        meta_model = l2l.algorithms.MAML(postagger, lr=inner_lr, first_order=True)
+    else:
+        meta_model = l2l.algorithms.MAML(postagger, lr=inner_lr)
+
     task_support_error, task_query_error = 0.0, []
     tqdm_bar = tqdm(range(num_episodes))
     all_metrics = {}
@@ -122,7 +155,7 @@ def evaluate(data_gen, meta_model, bert_model, task_bs, inner_loop_steps, inner_
         query_error, metrics = compute_loss(query_task, bert_model, learner, batch_size=task_bs)
         task_query_error.append(query_error)
         tqdm_bar.set_description("Query Loss: {:.3f}".format(query_error.item()))
-        wandb.log({"support_loss": support_error / inner_loop_steps, "query_loss": query_error})
+        # wandb.log({"support_loss": support_error / inner_loop_steps, "query_loss": query_error})
         for class_index in metrics.keys():
             if class_index in all_metrics:
                 all_metrics[class_index]["p"].append(metrics[class_index]["precision"])
@@ -134,7 +167,7 @@ def evaluate(data_gen, meta_model, bert_model, task_bs, inner_loop_steps, inner_
                     "r": [metrics[class_index]["recall"]],
                     "f": [metrics[class_index]["f1"]],
                 }
-            wandb.log({"{}_{}".format(dataset_names[class_index], k): v for k, v in metrics[class_index].items()})
+            # wandb.log({"{}_{}".format(dataset_names[class_index], k): v for k, v in metrics[class_index].items()})
 
     summary_metrics = {}
     for class_index in all_metrics.keys():
@@ -144,22 +177,23 @@ def evaluate(data_gen, meta_model, bert_model, task_bs, inner_loop_steps, inner_
             "r_stdev": stat.stdev(all_metrics[class_index]["r"]),
             "r": stat.mean(all_metrics[class_index]["r"]),
             "f_stdev": stat.stdev(all_metrics[class_index]["f"]),
-            "f": stat.mean(all_metrics[class_index]["f"])
+            "f": stat.mean(all_metrics[class_index]["f"]),
         }
     summary_metrics["loss"] = torch.tensor(task_query_error).mean().item()
-    wandb.run.summary["summary_metrics"] = summary_metrics
+    # wandb.run.summary["summary_metrics"] = summary_metrics
     return summary_metrics
 
 
 def init_args():
     parser = argparse.ArgumentParser(description="Test POS tagging on various UD datasets")
-    parser.add_argument("datasets", metavar="datasets", type=str, nargs="+", help="Datasets to meta-test on")
-    parser.add_argument("-s", "--split", help="Type of data to evaluate on", default="test")
+    parser.add_argument("datasets", metavar="datasets", type=str, nargs="+", help="Datasets to test on")
+    parser.add_argument("-s", "--split", help="Data split to evaluate on", default="test")
+    parser.add_argument(
+        "-e", "--eval_type", help="Type of evaluation (meta/regular)", choices=["meta", "regular", "both"], default="both"
+    )
     # pylint: disable=unused-argument
     req_named_params = parser.add_argument_group("required named arguments")
-    req_named_params.add_argument(
-        "-m", "--model_path", help="WandB runpath of the model to load (<user>/<project>/<run>)", required=True
-    )
+    req_named_params.add_argument("-m", "--model_path", help="path of the model to load", required=True)
     return parser.parse_args()
 
 
@@ -189,8 +223,6 @@ if __name__ == "__main__":
         data_split = Split.dev
 
     labels = set()
-    datasets = []
-
     # build label set for all datasets
     for dataset_path in dataset_paths:
         _, l = read_examples_from_file(dataset_path, Split.train, model_config["max_seq_length"])
@@ -198,61 +230,53 @@ if __name__ == "__main__":
     labels = sorted(list(labels))
     label_map = {i: label for i, label in enumerate(labels)}
 
-    # load individual datasets
-    for class_index, dataset_path in enumerate(dataset_paths):
-        dataset = PosDataset(
-            class_index,
-            dataset_path,
-            labels,
-            tokenizer,
-            model_config["model_type"],
-            model_config["max_seq_length"],
-            mode=data_split,
-        )
-        datasets.append(dataset)
-
-    # concatenate individual datasets into a single dataset
-    combined_dataset = ConcatDataset(datasets)
-
-    # convert to metadataset which is suitable for sampling tasks in an episode
-    meta_dataset = l2l.data.MetaDataset(combined_dataset)
-
-    # shots = number of examples per task, ways = number of classes per task
-    shots = model_config["shots"]
-    ways = model_config["ways"]
-
-    # create task generators
-    data_gen = l2l.data.TaskDataset(
-        meta_dataset,
-        num_tasks=model_config["num_tasks"],
-        task_transforms=[
-            l2l.data.transforms.FusedNWaysKShots(meta_dataset, n=ways, k=shots),
-            l2l.data.transforms.LoadData(meta_dataset),
-        ],
-    )
-
-    # define the bert and postagger model
-    bert_model = BERT(model_config["model_type"])
-    bert_model.eval()
-    bert_model = bert_model.to(DEVICE)
-
-    postagger = Classifier(len(labels), model_config["hidden_dropout_prob"], bert_model.get_hidden_size())
-
-    load_path = os.path.join(args.model_path, "best_model.th")
-    logging.info("Loading model from path: f{load_path}")
-    postagger.load_state_dict(torch.load(load_path))
-    postagger.to(DEVICE)
-
-    num_episodes = model_config["num_episodes"]
-    task_bs = model_config["task_batch_size"]
-    inner_loop_steps = model_config["inner_loop_steps"]
-    inner_lr = model_config["inner_lr"]
-
-    if model_config["is_fomaml"]:
-        meta_model = l2l.algorithms.MAML(postagger, lr=inner_lr, first_order=True)
+    if args.eval_type == "both":
+        args.eval_type = ["regular", "meta"]
     else:
-        meta_model = l2l.algorithms.MAML(postagger, lr=inner_lr)
+        args.eval_type = [args.eval_type]
 
-    summary_metrics = evaluate(data_gen, meta_model, bert_model, task_bs, inner_loop_steps, inner_lr, num_episodes)
-    logger.info(json.dumps(summary_metrics, indent=2))
+    for eval_type in args.eval_type:
+        datasets = []
+        # load individual datasets
+        for class_index, dataset_path in enumerate(dataset_paths):
+            dataset_args = [
+                class_index,
+                dataset_path,
+                labels,
+                tokenizer,
+                model_config["model_type"],
+                model_config["max_seq_length"],
+                data_split,
+            ]
+            if eval_type == "regular":
+                dataset = RegularPosDataset(*dataset_args[1:])
+            else:
+                dataset = MetaPosDataset(*dataset_args)
+            datasets.append(dataset)
+
+        # define the bert and postagger model
+        bert_model = BERT(model_config["model_type"])
+        bert_model.eval()
+        bert_model = bert_model.to(DEVICE)
+        postagger = Classifier(len(labels), model_config["hidden_dropout_prob"], bert_model.get_hidden_size())
+
+        load_path = os.path.join(args.model_path, "best_model.th")
+        logging.info("Loading model from path: {}".format(load_path))
+        postagger.load_state_dict(torch.load(load_path))
+        postagger.to(DEVICE)
+
+        logging.info("Running {} evaluation".format(eval_type))
+        if eval_type == "regular":
+            summary_metrics = {}
+            for idx, data in enumerate(datasets):
+                loader = DataLoader(
+                    data,
+                    batch_size=model_config["batch_size"],
+                    sampler=SequentialSampler(data),
+                    collate_fn=DefaultDataCollator().collate_batch,
+                )
+                summary_metrics[args.datasets[idx]] = regular_evaluate(loader, label_map, bert_model, postagger)
+        else:
+            summary_metrics = meta_evaluate(datasets, bert_model, postagger)
+        logger.info(json.dumps(summary_metrics, indent=2))
 

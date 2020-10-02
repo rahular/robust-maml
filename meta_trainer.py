@@ -158,7 +158,7 @@ if __name__ == "__main__":
 
     # concatenate individual datasets into a single dataset
     combined_train_dataset = ConcatDataset(train_datasets)
-    combined_dev_dataset = ConcatDataset(dev_datasets)
+    combined_dev_dataset = ConcatDataset(train_datasets)
 
     # convert to metadataset which is suitable for sampling tasks in an episode
     train_dataset = l2l.data.MetaDataset(combined_train_dataset)
