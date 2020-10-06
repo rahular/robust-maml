@@ -5,6 +5,7 @@ __pycache__/
 *.sh
 logs/
 wandb/
+test.ipynb
 
 # C extensions
 *.so
