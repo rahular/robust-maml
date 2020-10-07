@@ -22,9 +22,11 @@ logger = logging.getLogger(__name__)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def regular_evaluate(test_set, label_map, bert_model, clf_head, config):
-    loader = DataLoader(test_set, batch_size=config.batch_size)
-    return None
+def mtl_evaluate(test_set, label_map, bert_model, clf_head, config):
+    loader = DataLoader(test_set, batch_size=config.batch_size, collate_fn=utils.pos_collate_fn)
+    loss, metrics = utils.compute_loss_metrics(loader, bert_model, clf_head, label_map)
+    metrics.update({"loss": loss.item()})
+    return metrics
 
 
 def meta_evaluate(dataset, label_map, bert_model, clf_head, config):
@@ -57,7 +59,7 @@ def meta_evaluate(dataset, label_map, bert_model, clf_head, config):
             support_loader = DataLoader(
                 data_utils.InnerPOSDataset(support_task), batch_size=task_bs, shuffle=True, num_workers=0
             )
-            support_error, _ = utils.compute_loss(support_loader, bert_model, learner, label_map=label_map)
+            support_error, _ = utils.compute_loss_metrics(support_loader, bert_model, learner, label_map)
             grads = torch.autograd.grad(support_error, learner.parameters(), create_graph=True, allow_unused=True)
             l2l.algorithms.maml_update(learner, inner_lr, grads)
             task_support_error += support_error
@@ -65,7 +67,7 @@ def meta_evaluate(dataset, label_map, bert_model, clf_head, config):
         query_loader = DataLoader(
             data_utils.InnerPOSDataset(query_task), batch_size=task_bs, shuffle=True, num_workers=0
         )
-        query_error, metrics = utils.compute_loss(query_loader, bert_model, learner, label_map=label_map)
+        query_error, metrics = utils.compute_loss_metrics(query_loader, bert_model, learner, label_map)
         task_query_error.append(query_error)
         tqdm_bar.set_description("Query Loss: {:.3f}".format(query_error.item()))
 
@@ -97,7 +99,7 @@ def init_args():
         "-e",
         "--eval_type",
         help="Type of evaluation (meta/regular)",
-        choices=["meta", "regular", "both"],
+        choices=["meta", "mtl", "both"],
         default="both",
     )
     return parser.parse_args()
@@ -128,9 +130,9 @@ def main():
         clf_head = clf_head.to(DEVICE)
 
         logging.info("Running {} evaluation".format(eval_type))
-        if eval_type == "regular":
-            summary_metrics = regular_evaluate(test_set, label_map, bert_model, clf_head, config)
-        else:
+        if eval_type == "mtl":
+            summary_metrics = mtl_evaluate(test_set, label_map, bert_model, clf_head, config)
+        elif eval_type == "meta":
             summary_metrics = meta_evaluate(test_set, label_map, bert_model, clf_head, config)
         logger.info(json.dumps(summary_metrics, indent=2))
 
