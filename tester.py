@@ -86,12 +86,12 @@ def meta_evaluate(dataset, label_map, bert_model, clf_head, config):
 
 def init_args():
     parser = argparse.ArgumentParser(description="Test POS tagging on various UD datasets")
-    parser.add_argument("--test_path", dest="test_path", type=str, help="Datasets to test on", required=True)
+    parser.add_argument("--test_path", dest="test_path", type=str, help="Dataset to test on", required=True)
     parser.add_argument("--model_path", dest="model_path", type=str, help="Path of the model to load", required=True)
     parser.add_argument(
         "-e",
         "--eval_type",
-        help="Type of evaluation (meta/regular)",
+        help="Type of evaluation to perform",
         choices=["meta", "full", "both"],
         default="both",
     )
