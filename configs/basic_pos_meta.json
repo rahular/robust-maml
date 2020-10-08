@@ -3,7 +3,7 @@
     "max_seq_length": 128,
     "weight_decay": 0.1,
     "batch_size": 128,
-    "num_epochs": 200,
+    "num_epochs": 500,
     "patience": -1,
     "num_warmup_steps": 100,
     "seed": 42,
@@ -14,7 +14,7 @@
     "inner_lr": 0.1,
     "num_tasks": 20000,
     "task_batch_size": 20,
-    "num_episodes": 64,
+    "num_episodes": 32,
     "inner_loop_steps": 2,
     "shots": 50,
     "train_paths": [

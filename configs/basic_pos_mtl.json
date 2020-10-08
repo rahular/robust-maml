@@ -14,7 +14,7 @@
     "inner_lr": 0.1,
     "num_tasks": 20000,
     "task_batch_size": 20,
-    "num_episodes": 64,
+    "num_episodes": 32,
     "inner_loop_steps": 2,
     "shots": 50,
     "train_paths": [
