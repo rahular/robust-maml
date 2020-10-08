@@ -47,6 +47,7 @@ def compute_metrics(predictions, label_ids, label_map):
 
 def compute_loss_metrics(loader, bert_model, learner, label_map):
     loss = 0.0
+    gold, preds = None, None
     for batch, features in enumerate(loader):
         # it is done this way to be consistent with both outer (regular) and inner (meta) dataloaders
         input_ids, attention_mask, token_type_ids, labels = features[0], features[1], features[2], features[3]
@@ -56,20 +57,19 @@ def compute_loss_metrics(loader, bert_model, learner, label_map):
         curr_loss = output.loss
         loss += curr_loss
 
-        gold, preds = None, None
         for lgt, lbl in zip(output.logits, labels):
             if preds is None:
-                preds = torch.unsqueeze(lgt.detach(), 0)
+                preds = torch.unsqueeze(lgt.detach().cpu(), 0)
             else:
-                preds = torch.cat((preds, torch.unsqueeze(lgt.detach(), 0)), dim=0)
+                preds = torch.cat((preds, torch.unsqueeze(lgt.detach().cpu(), 0)), dim=0)
             if gold is None:
-                gold = torch.unsqueeze(lbl.detach(), 0)
+                gold = torch.unsqueeze(lbl.detach().cpu(), 0)
             else:
-                gold = torch.cat((gold, torch.unsqueeze(lbl.detach(), 0)), dim=0)
+                gold = torch.cat((gold, torch.unsqueeze(lbl.detach().cpu(), 0)), dim=0)
 
     metrics = None
     if preds is not None and gold is not None:
-        metrics = compute_metrics(preds.cpu().numpy(), gold.cpu().numpy(), label_map)
+        metrics = compute_metrics(preds.numpy(), gold.numpy(), label_map)
 
     loss /= (batch + 1)
     return loss, metrics

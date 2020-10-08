@@ -150,7 +150,6 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
     )
     dev_loader = DataLoader(
         dataset=dev_set,
-        sampler=utils.BalancedTaskSampler(dataset=dev_set, batch_size=config.batch_size),
         batch_size=config.batch_size,
         collate_fn=utils.pos_collate_fn,
         shuffle=False,
@@ -162,8 +161,9 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
     for epoch in range(num_epochs):
         running_loss = 0.0
         epoch_iterator = tqdm(train_loader, desc="Training")
+        clf_head = clf_head.train()
         for train_step, (input_ids, attention_mask, token_type_ids, labels, _) in enumerate(epoch_iterator):
-            clf_head.zero_grad()
+            opt.zero_grad()
             with torch.no_grad():
                 bert_output = bert_model(input_ids, attention_mask, token_type_ids)
             output = clf_head(bert_output, labels=labels, attention_mask=attention_mask)
@@ -173,6 +173,7 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
             running_loss += output.loss.item()
         logger.info(f"Finished epoch {epoch+1} with avg. training loss: {running_loss/(train_step + 1)}")
 
+        clf_head = clf_head.eval()
         dev_loss, dev_metrics = utils.compute_loss_metrics(dev_loader, bert_model, clf_head, label_map)
         logging.info(
             "Dev. metrics (p/r/f): {:.3f} {:.3f} {:.3f}".format(

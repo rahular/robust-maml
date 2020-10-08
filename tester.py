@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def mtl_evaluate(test_set, label_map, bert_model, clf_head, config):
+def full_evaluate(test_set, label_map, bert_model, clf_head, config):
     loader = DataLoader(test_set, batch_size=config.batch_size, collate_fn=utils.pos_collate_fn)
     loss, metrics = utils.compute_loss_metrics(loader, bert_model, clf_head, label_map)
     metrics.update({"loss": loss.item()})
@@ -89,17 +89,10 @@ def init_args():
     parser.add_argument("--test_path", dest="test_path", type=str, help="Datasets to test on", required=True)
     parser.add_argument("--model_path", dest="model_path", type=str, help="Path of the model to load", required=True)
     parser.add_argument(
-        "--config_path",
-        dest="config_path",
-        type=str,
-        help="Path of the config containing training params",
-        required=True,
-    )
-    parser.add_argument(
         "-e",
         "--eval_type",
         help="Type of evaluation (meta/regular)",
-        choices=["meta", "mtl", "both"],
+        choices=["meta", "full", "both"],
         default="both",
     )
     return parser.parse_args()
@@ -107,7 +100,7 @@ def init_args():
 
 def main():
     args = init_args()
-    config = model_utils.Config(args.config_path)
+    config = model_utils.Config(os.path.join(args.model_path, "config.json"))
 
     # for reproducibility
     torch.manual_seed(config.seed)
@@ -116,7 +109,7 @@ def main():
     label_map = {idx: l for idx, l in enumerate(data_utils.get_pos_labels())}
 
     if args.eval_type == "both":
-        eval_types = ["regular", "meta"]
+        eval_types = ["full", "meta"]
     else:
         eval_types = [args.eval_type]
     for eval_type in eval_types:
@@ -130,8 +123,8 @@ def main():
         clf_head = clf_head.to(DEVICE)
 
         logging.info("Running {} evaluation".format(eval_type))
-        if eval_type == "mtl":
-            summary_metrics = mtl_evaluate(test_set, label_map, bert_model, clf_head, config)
+        if eval_type == "full":
+            summary_metrics = full_evaluate(test_set, label_map, bert_model, clf_head, config)
         elif eval_type == "meta":
             summary_metrics = meta_evaluate(test_set, label_map, bert_model, clf_head, config)
         logger.info(json.dumps(summary_metrics, indent=2))
