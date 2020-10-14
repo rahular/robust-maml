@@ -30,16 +30,7 @@ def zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config):
 
 
 def evaluate(train_set, test_set, label_map, bert_model, clf_head, shots, config):
-    meta_dataset = l2l.data.MetaDataset(train_set)
-    train_task = l2l.data.TaskDataset(
-        meta_dataset,
-        num_tasks=config.num_tasks,
-        task_transforms=[
-            # here n=1 because the labels are language ids
-            l2l.data.transforms.FusedNWaysKShots(meta_dataset, n=1, k=shots),
-            l2l.data.transforms.LoadData(meta_dataset),
-        ],
-    )
+    train_task = data_utils.CustomPOSTaskDataset([train_set], n=1, k=shots, num_tasks=config.num_tasks)
     num_episodes = config.num_episodes
     task_bs = config.task_batch_size
     inner_loop_steps = config.inner_loop_steps

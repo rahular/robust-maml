@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 from torch.utils import data
 from transformers import AutoTokenizer
+from learn2learn.data import MetaDataset, TaskDataset
 
 
 @dataclass
@@ -33,6 +34,26 @@ class InnerPOSDataset(data.Dataset):
             self.token_type_ids[idx],
             self.label_ids[idx],
         )
+
+
+class CustomPOSTaskDataset():
+    def __init__(self, datasets, n, k, num_tasks):
+        self.tasksets = []
+        for dataset in datasets:
+            dataset = MetaDataset(dataset)
+            transforms = [
+                l2l.data.transforms.FusedNWaysKShots(dataset, n=n, k=k),
+                l2l.data.transforms.LoadData(dataset), 
+            ]
+            self.tasksets.append(TaskDataset(dataset, transforms, num_tasks=num_tasks))
+            
+    def sample(self, probs=None):
+        # this method assumes probs are already normalized
+        if probs == None:
+            probs = torch.ones(len(self.tasksets)) / len(self.tasksets)
+        dist = torch.distributions.Categorical(probs)
+        idx = dist.sample().item()
+        return self.tasksets[idx].sample()
 
 
 class POS(data.Dataset):

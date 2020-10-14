@@ -15,7 +15,6 @@ from shutil import copyfile
 
 from torch.optim import Adam
 from torch.utils.data import ConcatDataset, DataLoader
-from learn2learn.data import MetaDataset, TaskDataset
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
@@ -56,28 +55,9 @@ def save(model, optimizer, config_path, last_epoch):
 
 
 def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head):
-    train_set = MetaDataset(train_set)
-    train_taskset = TaskDataset(
-        train_set,
-        [
-            # here n=1, because we want only one language in an episode
-            l2l.data.transforms.FusedNWaysKShots(train_set, n=1, k=config.shots),
-            l2l.data.transforms.LoadData(train_set),
-        ],
-        num_tasks=config.num_tasks,
-    )
-
-    dev_set = MetaDataset(dev_set)
-    dev_taskset = TaskDataset(
-        dev_set,
-        [
-            # here n=1, because we want only one language in an episode
-            l2l.data.transforms.FusedNWaysKShots(dev_set, n=1, k=config.shots),
-            l2l.data.transforms.LoadData(dev_set),
-        ],
-        num_tasks=config.num_tasks,
-    )
-
+    # here n=1, because we want only one language in an episode
+    train_taskset = data_utils.CustomPOSTaskDataset(train_set, n=1, k=config.shots, num_tasks=config.num_tasks)
+    dev_taskset = data_utils.CustomPOSTaskDataset(dev_set, n=1, k=config.shots, num_tasks=config.num_tasks)
     num_epochs = config.num_epochs
     meta_model = l2l.algorithms.MAML(clf_head, lr=config.inner_lr, first_order=config.is_fomaml)
     opt = Adam(meta_model.parameters(), lr=config.outer_lr)
@@ -141,6 +121,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
 
 
 def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head):
+    train_set = ConcatDataset(train_set)
     train_loader = DataLoader(
         dataset=train_set,
         sampler=utils.BalancedTaskSampler(dataset=train_set, batch_size=config.batch_size),
@@ -148,6 +129,7 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
         collate_fn=utils.pos_collate_fn,
         shuffle=False,
     )
+    dev_set = ConcatDataset(dev_set)
     dev_loader = DataLoader(
         dataset=dev_set,
         batch_size=config.batch_size,
@@ -206,8 +188,8 @@ def main():
     train_paths = config.train_paths
     dev_paths = config.dev_paths
 
-    train_set = ConcatDataset([data_utils.POS(p, config.max_seq_length, config.model_type) for p in train_paths])
-    dev_set = ConcatDataset([data_utils.POS(p, config.max_seq_length, config.model_type) for p in dev_paths])
+    train_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in train_paths]
+    dev_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in dev_paths]
 
     label_map = {idx: l for idx, l in enumerate(data_utils.get_pos_labels())}
     bert_model = model_utils.BERT(config)
