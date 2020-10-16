@@ -82,7 +82,8 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
         opt.zero_grad()
         for _ in range(num_episodes):
             learner = meta_model.clone()
-            train_task, _ = train_taskset.sample(probs=softmax(minmax_dist) if config.minmax_sampling else None)
+            sample_probs = softmax(minmax_dist) if config.minmax_sampling else None
+            train_task, _ = train_taskset.sample(probs=sample_probs)
             dev_task, dev_langs = dev_taskset.sample()
 
             for _ in range(inner_loop_steps):
@@ -103,7 +104,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             train_iteration_error += train_error
 
             if config.minmax_sampling:
-                importance = minmax_dist[dev_taskset.lang2id[dev_langs[0]]]
+                importance = sample_probs[dev_taskset.lang2id[dev_langs[0]]]
                 dev_iteration_error *= importance
 
         dev_iteration_error /= num_episodes
