@@ -17,18 +17,5 @@
     "num_episodes": 32,
     "inner_loop_steps": 2,
     "shots": 50,
-    "train_paths": [
-        "./data/x/af.train",
-        "./data/x/bg.train",
-        "./data/x/da.train",
-        "./data/x/fi.train",
-        "./data/x/zh.train"
-    ],
-    "dev_paths": [
-        "./data/x/af.dev",
-        "./data/x/bg.dev",
-        "./data/x/da.dev",
-        "./data/x/fi.dev",
-        "./data/x/zh.dev"
-    ]
+    "train_langs": ["af", "bg", "da", "fi", "zh"]
 }

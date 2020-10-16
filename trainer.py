@@ -4,6 +4,7 @@ import logging
 import torch
 
 import numpy as np
+import torch.nn as nn
 import learn2learn as l2l
 
 import utils
@@ -60,21 +61,29 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
     dev_taskset = data_utils.CustomPOSTaskDataset(dev_set, n=1, k=config.shots, num_tasks=config.num_tasks)
     num_epochs = config.num_epochs
     meta_model = l2l.algorithms.MAML(clf_head, lr=config.inner_lr, first_order=config.is_fomaml)
-    opt = Adam(meta_model.parameters(), lr=config.outer_lr)
+    opt_params = meta_model.parameters()
     tqdm_bar = tqdm(range(num_epochs))
     num_episodes = config.num_episodes
     task_bs = config.task_batch_size
     inner_loop_steps = config.inner_loop_steps
+
+    if config.minmax_sampling:
+        # start with a uniform distribution
+        minmax_dist = nn.Parameter(torch.ones(len(train_set), dtype=torch.float32) / len(train_set))
+        softmax = nn.Softmax(dim=0)
+        opt_params = list(opt_params) + [minmax_dist]
+    opt = Adam(opt_params, lr=config.outer_lr)
 
     best_dev_error = np.inf
     patience_ctr = 0
     for iteration in tqdm_bar:
         dev_iteration_error = 0.0
         train_iteration_error = 0.0
+        opt.zero_grad()
         for _ in range(num_episodes):
             learner = meta_model.clone()
-            train_task, _ = train_taskset.sample()
-            dev_task, _ = dev_taskset.sample()
+            train_task, _ = train_taskset.sample(probs=softmax(minmax_dist) if config.minmax_sampling else None)
+            dev_task, dev_langs = dev_taskset.sample()
 
             for _ in range(inner_loop_steps):
                 train_loader = DataLoader(
@@ -93,6 +102,10 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             dev_iteration_error += dev_error
             train_iteration_error += train_error
 
+            if config.minmax_sampling:
+                importance = minmax_dist[dev_taskset.lang2id[dev_langs[0]]]
+                dev_iteration_error *= importance
+
         dev_iteration_error /= num_episodes
         train_iteration_error /= num_episodes
         tqdm_bar.set_description(
@@ -100,10 +113,8 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 train_iteration_error.item(), train_metrics["f1"], dev_iteration_error.item(), dev_metrics["f1"]
             )
         )
-        opt.zero_grad()
         dev_iteration_error.backward()
         opt.step()
-        meta_model.zero_grad()
 
         if dev_iteration_error < best_dev_error:
             # logging.info("Found new best model!")
@@ -116,6 +127,8 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 logging.info("Ran out of patience. Stopping training early...")
                 break
 
+    if config.minmax_sampling:
+        logging.info("Final minmax sampling dist: {}".format(minmax_dist))
     logging.info(f"Best validation loss = {best_dev_error}")
     logging.info("Best model saved at: {}".format(utils.get_savedir_name()))
 
@@ -185,8 +198,9 @@ def main():
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
 
-    train_paths = config.train_paths
-    dev_paths = config.dev_paths
+    train_langs = config.train_langs
+    train_paths = [f"./data/x/{lang}.train" for lang in train_langs]
+    dev_paths = [f"./data/x/{lang}.dev" for lang in train_langs]
 
     train_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in train_paths]
     dev_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in dev_paths]

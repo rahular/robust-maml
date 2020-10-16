@@ -1,7 +1,9 @@
 import torch
 import pyconll
 import pandas as pd
+import learn2learn as l2l
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import List, Optional
 from torch.utils import data
@@ -37,23 +39,26 @@ class InnerPOSDataset(data.Dataset):
 
 
 class CustomPOSTaskDataset():
-    def __init__(self, datasets, n, k, num_tasks):
-        self.tasksets = []
+    def __init__(self, datasets, n, k, num_tasks=10000):
+        self.tasksets = OrderedDict()
         for dataset in datasets:
+            lang = dataset.lang
             dataset = MetaDataset(dataset)
             transforms = [
                 l2l.data.transforms.FusedNWaysKShots(dataset, n=n, k=k),
                 l2l.data.transforms.LoadData(dataset), 
             ]
-            self.tasksets.append(TaskDataset(dataset, transforms, num_tasks=num_tasks))
+            self.tasksets[lang] = TaskDataset(dataset, transforms, num_tasks=num_tasks)
+        self.id2lang = {idx: lang for idx, lang in enumerate(self.tasksets.keys())}
+        self.lang2id = {lang: idx for idx, lang in self.id2lang.items()}
             
     def sample(self, probs=None):
-        # this method assumes probs are already normalized
+        # assumes probs is already normalized
         if probs == None:
             probs = torch.ones(len(self.tasksets)) / len(self.tasksets)
         dist = torch.distributions.Categorical(probs)
-        idx = dist.sample().item()
-        return self.tasksets[idx].sample()
+        lang = self.id2lang[dist.sample().item()]
+        return self.tasksets[lang].sample()
 
 
 class POS(data.Dataset):

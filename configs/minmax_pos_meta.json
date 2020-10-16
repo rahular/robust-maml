@@ -17,6 +17,6 @@
     "num_episodes": 32,
     "inner_loop_steps": 2,
     "shots": 50,
-    "minmax_sampling": false,
+    "minmax_sampling": true,
     "train_langs": ["af", "bg", "da", "fi", "zh"]
 }
