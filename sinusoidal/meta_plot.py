@@ -9,8 +9,8 @@ df_skewed = pd.read_pickle('results/bayes_skewed_discrete/res.pkl')
 df_uniform['Task Distribution'] = 'Identical'
 df_skewed['Task Distribution'] = 'Skewed'
 
-df_mm_uniform = pd.read_pickle('results/minimax_uniform_discrete/res.pkl')
-df_mm_skewed = pd.read_pickle('results/minimax_skewed_discrete/res.pkl')
+df_mm_uniform = pd.read_pickle('results/minimax_uniform_newsoftmax/res.pkl')
+df_mm_skewed = pd.read_pickle('results/minimax_skewed_newsoftmax/res.pkl')
 df_mm_uniform['Task Distribution'] = 'Identical'
 df_mm_skewed['Task Distribution'] = 'Skewed'
 
