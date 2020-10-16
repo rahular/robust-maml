@@ -26,7 +26,7 @@ class TaskSampler(nn.Module):
         phase_distribution = Categorical(logits=self.tau_phase)
         amplitude_idxs = amplitude_distribution.sample(sample_shape=(n_tasks, ))
         phase_idxs = phase_distribution.sample(sample_shape=(n_tasks, ))
-        task_probs = self.softmax(self.tau_amplitude[amplitude_idxs] + self.tau_phase[phase_idxs])
+        task_probs = self.softmax(self.tau_amplitude)[amplitude_idxs] * self.softmax(self.tau_phase)[phase_idxs]
         return (amplitude_idxs, phase_idxs), task_probs
 
 
