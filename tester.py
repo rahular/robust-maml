@@ -30,7 +30,10 @@ def zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config):
 
 
 def evaluate(train_set, test_set, label_map, bert_model, clf_head, shots, config):
-    train_task = data_utils.CustomPOSTaskDataset([train_set], n=1, k=shots, num_tasks=config.num_tasks)
+    task_dataset = (
+        data_utils.CustomPOSAllTaskDataset if config.task_type == "all" else data_utils.CustomPOSLangTaskDataset
+    )
+    train_task = task_dataset([train_set], n=1, k=shots, num_tasks=config.num_tasks)
     num_episodes = config.num_episodes
     task_bs = config.task_batch_size
     inner_loop_steps = config.inner_loop_steps
@@ -44,7 +47,7 @@ def evaluate(train_set, test_set, label_map, bert_model, clf_head, shots, config
     all_metrics = {"p": [], "r": [], "f": []}
     for _ in tqdm_bar:
         learner = meta_model.clone()
-        support_task, _ = train_task.sample()
+        (support_task, _), _ = train_task.sample()
         for _ in range(inner_loop_steps):
             support_loader = DataLoader(
                 data_utils.InnerPOSDataset(support_task), batch_size=task_bs, shuffle=True, num_workers=0
@@ -111,6 +114,10 @@ def main():
         summary_metrics = evaluate(train_set, test_set, label_map, bert_model, clf_head, shots, config)
     logger.info("{} shot results:\n{}".format(shots, json.dumps(summary_metrics, indent=2)))
 
+    save_dir = os.path.join(args.model_path, "result")
+    os.makedirs(save_dir, exist_ok=True)
+    with open(os.path.join(save_dir, "{}_{}_shot.json".format(args.test_lang, shots)), "w") as f:
+        f.write(json.dumps(summary_metrics, indent=2))
 
 if __name__ == "__main__":
     main()

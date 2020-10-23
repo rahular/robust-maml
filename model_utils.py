@@ -76,4 +76,5 @@ class SeqClfHead(nn.Module):
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
         return ClassifierOutput(loss=loss, logits=logits,)
+        # return {"loss": loss, "logits": logits}
 

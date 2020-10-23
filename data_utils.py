@@ -1,14 +1,18 @@
 import torch
 import pyconll
+import torch.nn as nn
 import pandas as pd
 import learn2learn as l2l
 
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import List, Optional
+from torch.distributions.categorical import Categorical
 from torch.utils import data
 from transformers import AutoTokenizer
 from learn2learn.data import MetaDataset, TaskDataset
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 @dataclass
@@ -21,10 +25,10 @@ class POSInputFeatures:
 
 class InnerPOSDataset(data.Dataset):
     def __init__(self, data):
-        self.input_ids = torch.transpose(torch.stack(data['input_ids']), 0, 1)
-        self.attention_mask = torch.transpose(torch.stack(data['attention_mask']), 0, 1)
-        self.token_type_ids = torch.transpose(torch.stack(data['token_type_ids']), 0, 1)
-        self.label_ids = torch.transpose(torch.stack(data['label_ids']), 0, 1)
+        self.input_ids = torch.transpose(torch.stack(data["input_ids"]), 0, 1)
+        self.attention_mask = torch.transpose(torch.stack(data["attention_mask"]), 0, 1)
+        self.token_type_ids = torch.transpose(torch.stack(data["token_type_ids"]), 0, 1)
+        self.label_ids = torch.transpose(torch.stack(data["label_ids"]), 0, 1)
 
     def __len__(self):
         return len(self.label_ids)
@@ -38,27 +42,60 @@ class InnerPOSDataset(data.Dataset):
         )
 
 
-class CustomPOSTaskDataset():
-    def __init__(self, datasets, n, k, num_tasks=10000):
+#### LANGUAGE AS TASKS ####
+class CustomPOSLangTaskDataset:
+    def __init__(self, datasets, n, k, do_minmax=False, num_tasks=10000):
         self.tasksets = OrderedDict()
         for dataset in datasets:
             lang = dataset.lang
+            # sometimes, the length of the dataset is less than k
+            k = len(dataset) if k > len(dataset) else k
             dataset = MetaDataset(dataset)
             transforms = [
                 l2l.data.transforms.FusedNWaysKShots(dataset, n=n, k=k),
-                l2l.data.transforms.LoadData(dataset), 
+                l2l.data.transforms.LoadData(dataset),
             ]
             self.tasksets[lang] = TaskDataset(dataset, transforms, num_tasks=num_tasks)
         self.id2lang = {idx: lang for idx, lang in enumerate(self.tasksets.keys())}
         self.lang2id = {lang: idx for idx, lang in self.id2lang.items()}
-            
-    def sample(self, probs=None):
-        # assumes probs is already normalized
-        if probs == None:
-            probs = torch.ones(len(self.tasksets)) / len(self.tasksets)
-        dist = torch.distributions.Categorical(probs)
-        lang = self.id2lang[dist.sample().item()]
-        return self.tasksets[lang].sample()
+        self.num_tasks = len(self.tasksets)
+        self.tau = nn.Parameter(
+            torch.ones(self.num_tasks, dtype=torch.float32, requires_grad=do_minmax, device=DEVICE) / self.num_tasks
+        )
+        self.softmax = nn.Softmax(dim=0)
+
+    def sample(self):
+        tau_dist = Categorical(logits=self.tau)
+        task_probs = self.softmax(self.tau)
+        task_idx = tau_dist.sample().item()
+        lang = self.id2lang[task_idx]
+        return self.tasksets[lang].sample(), task_probs[task_idx]
+
+
+#### INDIVIDUAL TASKS ####
+class CustomPOSAllTaskDataset:
+    def __init__(self, datasets, n, k, do_minmax=False, num_tasks=10000):
+        self.taskset = []
+        for dataset in datasets:
+            dataset = MetaDataset(dataset)
+            transforms = [
+                l2l.data.transforms.FusedNWaysKShots(dataset, n=n, k=k),
+                l2l.data.transforms.LoadData(dataset),
+            ]
+            self.taskset.extend(
+                [task for task in TaskDataset(dataset, transforms, num_tasks=num_tasks // len(datasets))]
+            )
+        self.num_tasks = len(self.taskset)
+        self.tau = nn.Parameter(
+            torch.ones(self.num_tasks, dtype=torch.float32, requires_grad=do_minmax, device=DEVICE) / self.num_tasks
+        )
+        self.softmax = nn.Softmax(dim=0)
+
+    def sample(self):
+        tau_dist = Categorical(logits=self.tau)
+        task_probs = self.softmax(self.tau)
+        task_idx = tau_dist.sample().item()
+        return self.taskset[task_idx], task_probs[task_idx]
 
 
 class POS(data.Dataset):
