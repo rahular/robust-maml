@@ -1,22 +1,21 @@
 {
     "model_type": "bert-base-multilingual-cased",
+    "data_dir": "./data/all",
     "max_seq_length": 128,
-    "weight_decay": 0.1,
     "batch_size": 128,
-    "num_epochs": 500,
+    "num_epochs": 10000,
     "patience": -1,
-    "num_warmup_steps": 100,
     "seed": 42,
     "max_grad_norm": 5.0,
     "hidden_dropout_prob": 0.2,
     "is_fomaml": true,
     "outer_lr": 0.0005,
     "inner_lr": 0.1,
-    "num_tasks": 20000,
+    "num_tasks": 400,
     "task_batch_size": 20,
+    "task_type": "lang",
     "num_episodes": 32,
-    "inner_loop_steps": 2,
+    "inner_loop_steps": 4,
     "shots": 50,
-    "minmax_sampling": false,
-    "train_langs": ["af", "bg", "da", "fi", "zh"]
+    "minmax_sampling": false
 }
