@@ -1,5 +1,7 @@
 import math
 import torch
+import string
+import random
 import logging
 import numpy as np
 import torch.nn as nn
@@ -21,6 +23,8 @@ def get_savedir_name():
     global savedir
     if not savedir:
         savedir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        # just to be extra careful
+        savedir += ("-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4)))
         logging.info(f"All models will be saved at: {savedir}")
     return savedir
 
@@ -45,7 +49,7 @@ def compute_metrics(predictions, label_ids, label_map):
     }
 
 
-def compute_loss_metrics(loader, bert_model, learner, label_map):
+def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=True):
     loss = 0.0
     gold, preds = None, None
     for batch, features in enumerate(loader):
@@ -53,7 +57,8 @@ def compute_loss_metrics(loader, bert_model, learner, label_map):
         input_ids, attention_mask, token_type_ids, labels = features[0], features[1], features[2], features[3]
         with torch.no_grad():
             bert_output = bert_model(input_ids, attention_mask, token_type_ids)
-        output = learner(bert_output, labels=labels, attention_mask=attention_mask)
+        with torch.set_grad_enabled(grad_required):
+            output = learner(bert_output, labels=labels, attention_mask=attention_mask)
         curr_loss = output.loss
         loss += curr_loss
 
