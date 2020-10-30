@@ -18,6 +18,8 @@ from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import ConcatDataset, DataLoader
 
+from optims import ALCGD
+
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
 )
@@ -60,25 +62,33 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
     save_dir = "./models/{}".format(utils.get_savedir_name())
     tb_writer = SummaryWriter(os.path.join(save_dir, "logs"))
 
-    task_dataset = (
-        data_utils.CustomPOSAllTaskDataset if config.task_type == "all" else data_utils.CustomPOSLangTaskDataset
-    )
-    # here n=1, because we want only one language in an episode
-    train_taskset = task_dataset(
-        train_set, n=1, k=config.shots, do_minmax=config.minmax_sampling, num_tasks=config.num_tasks
-    )
-    dev_taskset = task_dataset(dev_set, n=1, k=config.shots, num_tasks=config.num_tasks)
+    train_taskset = data_utils.CustomPOSLangTaskDataset(train_set, do_minmax=config.minmax_sampling)
+    dev_taskset = data_utils.CustomPOSLangTaskDataset(dev_set)
     num_epochs = config.num_epochs
     meta_model = l2l.algorithms.MAML(clf_head, lr=config.inner_lr, first_order=config.is_fomaml)
-    opt_params = meta_model.parameters()
     tqdm_bar = tqdm(range(num_epochs))
     num_episodes = config.num_episodes
     task_bs = config.task_batch_size
     inner_loop_steps = config.inner_loop_steps
 
-    if config.minmax_sampling:
-        opt_params = list(opt_params) + [train_taskset.tau]
-    opt = Adam(opt_params, lr=config.outer_lr)
+    if config.optim == "adam":
+        opt_params = meta_model.parameters()
+        if config.minmax_sampling:
+            opt_params = list(opt_params) + [train_taskset.tau]
+        opt = Adam(opt_params, lr=config.outer_lr)
+    elif config.optim == "alcgd":
+        if not config.minmax_sampling:
+            raise ValueError(f"ALCGD optimizer can only be used if `minmax_sampling` is true")
+        torch.backends.cudnn.benchmark = True
+        opt = ALCGD(
+            max_params=train_taskset.tau,
+            min_params=meta_model.parameters(),
+            lr_max=config.outer_lr,
+            lr_min=config.outer_lr,
+            device=DEVICE,
+        )
+    else:
+        raise ValueError(f"Invalid option: {config.optim} for `config.optim`")
 
     best_dev_error = np.inf
     patience_ctr = 0
@@ -88,29 +98,33 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
         opt.zero_grad()
         for episode_num in range(num_episodes):
             learner = meta_model.clone()
-            (train_task, _), importance = train_taskset.sample()
-            (dev_task, _), _ = dev_taskset.sample()
+            (train_task, train_langs), imps = train_taskset.sample(k=config.shots)
+            (dev_task, _), _ = dev_taskset.sample(k=config.shots, langs=train_langs)
 
             for _ in range(inner_loop_steps):
                 train_loader = DataLoader(
-                    data_utils.InnerPOSDataset(train_task), batch_size=task_bs, shuffle=True, num_workers=0
+                    data_utils.InnerPOSDataset(train_task), batch_size=task_bs, shuffle=False, num_workers=0
                 )
                 train_error, train_metrics = utils.compute_loss_metrics(
                     train_loader, bert_model, learner, label_map=label_map
                 )
+                train_error = train_error.mean()
+                train_iteration_error += train_error
                 grads = torch.autograd.grad(train_error, learner.parameters(), create_graph=True, allow_unused=True)
                 # TODO: change `max_grad_norm` to something else?
                 grads = tuple([g.clamp_(-config.max_grad_norm, config.max_grad_norm) for g in grads])
                 l2l.algorithms.maml_update(learner, config.inner_lr, grads)
 
             dev_loader = DataLoader(
-                data_utils.InnerPOSDataset(dev_task), batch_size=task_bs, shuffle=True, num_workers=0
+                data_utils.InnerPOSDataset(dev_task), batch_size=task_bs, shuffle=False, num_workers=0
             )
             dev_error, dev_metrics = utils.compute_loss_metrics(dev_loader, bert_model, learner, label_map=label_map)
             if config.minmax_sampling:
-                dev_error *= importance
+                dev_error *= imps
+                dev_error = dev_error.sum()
+            else:
+                dev_error = dev_error.mean()
             dev_iteration_error += dev_error
-            train_iteration_error += train_error
 
             tb_writer.add_scalar("metrics/loss", dev_error, (iteration * num_epochs) + episode_num)
             tb_writer.add_scalar("metrics/precision", dev_metrics["precision"], (iteration * num_epochs) + episode_num)
@@ -124,9 +138,12 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 train_iteration_error.item(), train_metrics["f1"], dev_iteration_error.item(), dev_metrics["f1"]
             )
         )
-        dev_iteration_error.backward()
-        torch.nn.utils.clip_grad_norm_(opt_params, config.max_grad_norm)
-        opt.step()
+        if config.optim == "adam":
+            dev_iteration_error.backward()
+            torch.nn.utils.clip_grad_norm_(opt_params, config.max_grad_norm)
+            opt.step()
+        elif config.optim == "alcgd":
+            opt.step(loss=dev_iteration_error)
 
         if dev_iteration_error < best_dev_error:
             # logging.info("Found new best model!")
@@ -225,9 +242,9 @@ def main():
     dev_paths = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith("dev")])
 
     logging.info("Creating train sets...")
-    train_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in tqdm(train_paths)]
+    train_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in tqdm(train_paths[:2])]
     logging.info("Creating dev sets...")
-    dev_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in tqdm(dev_paths)]
+    dev_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in tqdm(dev_paths[:2])]
 
     label_map = {idx: l for idx, l in enumerate(data_utils.get_pos_labels())}
     bert_model = model_utils.BERT(config)

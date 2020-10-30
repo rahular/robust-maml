@@ -50,7 +50,7 @@ def compute_metrics(predictions, label_ids, label_map):
 
 
 def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=True):
-    loss = 0.0
+    loss = None
     gold, preds = None, None
     for batch, features in enumerate(loader):
         # it is done this way to be consistent with both outer (regular) and inner (meta) dataloaders
@@ -59,8 +59,10 @@ def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=T
             bert_output = bert_model(input_ids, attention_mask, token_type_ids)
         with torch.set_grad_enabled(grad_required):
             output = learner(bert_output, labels=labels, attention_mask=attention_mask)
-        curr_loss = output.loss
-        loss += curr_loss
+        if loss is None:
+            loss = output.loss
+        else:
+            loss = torch.cat([loss, output.loss], 0)
 
         for lgt, lbl in zip(output.logits, labels):
             if preds is None:
@@ -76,7 +78,6 @@ def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=T
     if preds is not None and gold is not None:
         metrics = compute_metrics(preds.numpy(), gold.numpy(), label_map)
 
-    loss /= (batch + 1)
     return loss, metrics
 
 
