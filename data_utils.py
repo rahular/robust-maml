@@ -92,6 +92,20 @@ class CustomPOSLangTaskDataset:
         )
         self.softmax = nn.Softmax(dim=0)
 
+    def _append_tensor(self, X, x):
+        X["input_ids"].append(torch.tensor(x["input_ids"], dtype=torch.long))
+        X["attention_mask"].append(torch.tensor(x["attention_mask"], dtype=torch.long))
+        X["token_type_ids"].append(torch.tensor(x["token_type_ids"], dtype=torch.long))
+        X["label_ids"].append(torch.tensor(x["label_ids"], dtype=torch.long))
+        return X
+
+    def _stack_tensors(self, X):
+        X["input_ids"] = torch.stack(X["input_ids"], 0)
+        X["attention_mask"] = torch.stack(X["attention_mask"], 0)
+        X["token_type_ids"] = torch.stack(X["token_type_ids"], 0)
+        X["label_ids"] = torch.stack(X["label_ids"], 0)
+        return X
+
     def sample(self, k=50, langs=None):
         tau_dist = Categorical(logits=self.tau)
         if langs is None:
@@ -111,17 +125,33 @@ class CustomPOSLangTaskDataset:
         Y = []
         for lang in langs:
             x, y = self.datasets[lang].sample()
-            X["input_ids"].append(torch.tensor(x["input_ids"], dtype=torch.long))
-            X["attention_mask"].append(torch.tensor(x["attention_mask"], dtype=torch.long))
-            X["token_type_ids"].append(torch.tensor(x["token_type_ids"], dtype=torch.long))
-            X["label_ids"].append(torch.tensor(x["label_ids"], dtype=torch.long))
+            X = self._append_tensor(X, x)
             Y.append(y)
-        X["input_ids"] = torch.stack(X["input_ids"], 0)
-        X["attention_mask"] = torch.stack(X["attention_mask"], 0)
-        X["token_type_ids"] = torch.stack(X["token_type_ids"], 0)
-        X["label_ids"] = torch.stack(X["label_ids"], 0)
+        X = self._stack_tensors(X)
 
         return (X, Y), F.softmax(self.tau[lang_idx], dim=0) + (0 * self.tau.sum())
+
+    def test_sample(self, k=50):
+        # this is used only during testing, so there should only be one language
+        assert len(self.datasets) == 1
+        dataset = list(self.datasets.values())[0]
+        support_X = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "label_ids": []}
+        query_X = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "label_ids": []}
+        ids = list(range(len(dataset)))
+        random.shuffle(ids)
+        support_ids, query_ids = ids[:k], ids[k:]
+
+        for idx in support_ids:
+            x, _ = dataset[idx]
+            support_X = self._append_tensor(support_X, x)
+        support_X = self._stack_tensors(support_X)
+
+        for idx in query_ids:
+            x, _ = dataset[idx]
+            query_X = self._append_tensor(query_X, x)
+        query_X = self._stack_tensors(query_X)
+
+        return support_X, query_X
 
 
 class POS(data.Dataset):
@@ -161,7 +191,7 @@ class POS(data.Dataset):
         )
 
     def sample(self):
-        return self.__getitem__(random.randint(0, len(self.features)-1))
+        return self.__getitem__(random.randint(0, len(self.features) - 1))
 
     def convert_examples_to_features(
         self,
