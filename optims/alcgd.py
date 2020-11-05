@@ -13,8 +13,8 @@ class ALCGD(object):
                  device=torch.device('cpu')):
         self.max_params = list(max_params)
         self.min_params = list(min_params)
-        num_max_params = sum(p.numel() for p in max_params)
-        num_min_params = sum(p.numel() for p in min_params)
+        num_max_params = sum(p.numel() for p in self.max_params)
+        num_min_params = sum(p.numel() for p in self.min_params)
         self.state = {'lr_max': lr_max, 'lr_min': lr_min,
                       'momentum': momentum, 'eps': eps,
                       'step': 0, 'old_max': None, 'old_min': None,
