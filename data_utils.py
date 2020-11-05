@@ -49,48 +49,21 @@ class InnerPOSDataset(data.Dataset):
         )
 
 
-#### LANGUAGE AS TASKS ####
-# class CustomPOSLangTaskDataset:
-#     def __init__(self, datasets, n, k, do_minmax=False, num_tasks=10000):
-#         self.tasksets = OrderedDict()
-#         for dataset in datasets:
-#             lang = dataset.lang
-#             # sometimes, the length of the dataset is less than k
-#             if k > len(dataset):
-#                 logger.warning(f"Length of {lang} dataset is lesser than {k}. Setting k to {len(dataset)}.")
-#                 k = len(dataset)
-#             dataset = MetaDataset(dataset)
-#             transforms = [
-#                 l2l.data.transforms.FusedNWaysKShots(dataset, n=n, k=k),
-#                 l2l.data.transforms.LoadData(dataset),
-#             ]
-#             self.tasksets[lang] = TaskDataset(dataset, transforms, num_tasks=num_tasks)
-#         self.id2lang = {idx: lang for idx, lang in enumerate(self.tasksets.keys())}
-#         self.lang2id = {lang: idx for idx, lang in self.id2lang.items()}
-#         self.num_tasks = len(self.tasksets)
-#         self.tau = nn.Parameter(
-#             torch.ones(self.num_tasks, dtype=torch.float32, requires_grad=do_minmax, device=DEVICE) / self.num_tasks
-#         )
-#         self.softmax = nn.Softmax(dim=0)
-
-#     def sample(self):
-#         tau_dist = Categorical(logits=self.tau)
-#         task_probs = self.softmax(self.tau)
-#         task_idx = tau_dist.sample().item()
-#         lang = self.id2lang[task_idx]
-#         return self.tasksets[lang].sample(), task_probs[task_idx]
-
-
 class CustomPOSLangTaskDataset:
-    def __init__(self, datasets, do_minmax=False):
+    def __init__(self, datasets, train_type=None):
         self.datasets = {d.lang: d for d in datasets}
         self.id2lang = {idx: lang for idx, lang in enumerate(sorted(self.datasets.keys()))}
         self.lang2id = {lang: idx for idx, lang in self.id2lang.items()}
         total_langs = len(self.datasets)
         self.tau = nn.Parameter(
-            torch.ones(total_langs, dtype=torch.float32, requires_grad=do_minmax, device=DEVICE) / total_langs
+            torch.ones(total_langs, dtype=torch.float32, requires_grad=(train_type != "metabase"), device=DEVICE)
+            / total_langs
         )
-        self.softmax = nn.Softmax(dim=0)
+        self.activation = lambda x: x  # pass-through activation
+        if train_type == "minmax":
+            self.activation = F.softmax
+        elif train_type == "constrain":
+            self.activation = F.softplus
 
     def _append_tensor(self, X, x):
         X["input_ids"].append(torch.tensor(x["input_ids"], dtype=torch.long))
@@ -129,7 +102,7 @@ class CustomPOSLangTaskDataset:
             Y.append(y)
         X = self._stack_tensors(X)
 
-        return (X, Y), F.softmax(self.tau[lang_idx], dim=0) + (0 * self.tau.sum())
+        return (X, Y), self.activation(self.tau[lang_idx]) + (0 * self.tau.sum())
 
     def test_sample(self, k=50):
         # this is used only during testing, so there should only be one language

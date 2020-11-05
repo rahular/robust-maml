@@ -16,5 +16,5 @@
     "num_episodes": 32,
     "inner_loop_steps": 4,
     "shots": 50,
-    "minmax_sampling": true
+    "train_type": "minmax"
 }

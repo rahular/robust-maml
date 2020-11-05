@@ -16,5 +16,6 @@
     "num_episodes": 32,
     "inner_loop_steps": 4,
     "shots": 50,
-    "train_type": "metabase"
+    "train_type": "constrain",
+    "constrain_val": 0.1
 }

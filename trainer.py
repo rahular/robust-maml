@@ -62,7 +62,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
     save_dir = "./models/{}".format(utils.get_savedir_name())
     tb_writer = SummaryWriter(os.path.join(save_dir, "logs"))
 
-    train_taskset = data_utils.CustomPOSLangTaskDataset(train_set, do_minmax=config.minmax_sampling)
+    train_taskset = data_utils.CustomPOSLangTaskDataset(train_set, train_type=config.train_type)
     dev_taskset = data_utils.CustomPOSLangTaskDataset(dev_set)
     num_epochs = config.num_epochs
     meta_model = l2l.algorithms.MAML(clf_head, lr=config.inner_lr, first_order=config.is_fomaml)
@@ -73,12 +73,12 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
 
     if config.optim == "adam":
         opt_params = meta_model.parameters()
-        if config.minmax_sampling:
+        if config.train_type != "metabase":
             opt_params = list(opt_params) + [train_taskset.tau]
         opt = Adam(opt_params, lr=config.outer_lr)
     elif config.optim == "alcgd":
-        if not config.minmax_sampling:
-            raise ValueError(f"ALCGD optimizer can only be used if `minmax_sampling` is true")
+        if config.train_type == "metabase":
+            raise ValueError(f"ALCGD optimizer can only be used for `minmax` or `constrain` train types.")
         torch.backends.cudnn.benchmark = True
         opt = ALCGD(
             max_params=train_taskset.tau,
@@ -119,11 +119,15 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 data_utils.InnerPOSDataset(dev_task), batch_size=task_bs, shuffle=False, num_workers=0
             )
             dev_error, dev_metrics = utils.compute_loss_metrics(dev_loader, bert_model, learner, label_map=label_map)
-            if config.minmax_sampling:
+            if config.train_type == "minmax":
                 dev_error *= imps
                 dev_error = dev_error.sum()
-            else:
+            elif config.train_type == "constrain":
+                dev_error = dev_error.mean() + ((dev_error - config.constrain_val) * imps).sum()
+            elif config.train_type == "metabase":
                 dev_error = dev_error.mean()
+            else:
+                raise ValueError(f"Invalid option: {config.train_type} for `config.train_type`")
             dev_iteration_error += dev_error
 
             tb_writer.add_scalar("metrics/loss", dev_error, (iteration * num_epochs) + episode_num)
@@ -156,7 +160,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 logging.info("Ran out of patience. Stopping training early...")
                 break
 
-        if config.minmax_sampling and iteration % 10 == 0:
+        if config.train_type != "metabase" and iteration % 10 == 0:
             save_dir = "./models/{}".format(utils.get_savedir_name())
             with open(os.path.join(save_dir, "minmax_dist.npy"), "wb") as f:
                 np.save(f, train_taskset.tau.detach().cpu().numpy())
@@ -242,9 +246,9 @@ def main():
     dev_paths = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith("dev")])
 
     logging.info("Creating train sets...")
-    train_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in tqdm(train_paths[:2])]
+    train_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in tqdm(train_paths)]
     logging.info("Creating dev sets...")
-    dev_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in tqdm(dev_paths[:2])]
+    dev_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in tqdm(dev_paths)]
 
     label_map = {idx: l for idx, l in enumerate(data_utils.get_pos_labels())}
     bert_model = model_utils.BERT(config)
@@ -252,10 +256,10 @@ def main():
     clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size())
     clf_head = clf_head.to(DEVICE)
 
-    if args.train_type == "meta":
-        meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
-    elif args.train_type == "mtl":
+    if config.train_type == "mtl":
         mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
+    else:
+        meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
 
 
 if __name__ == "__main__":
