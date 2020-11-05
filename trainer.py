@@ -74,14 +74,14 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
     if config.optim == "adam":
         opt_params = meta_model.parameters()
         if config.train_type != "metabase":
-            opt_params = list(opt_params) + [train_taskset.tau]
+            opt_params = list(opt_params) + train_taskset.parameters()
         opt = Adam(opt_params, lr=config.outer_lr)
     elif config.optim == "alcgd":
         if config.train_type == "metabase":
             raise ValueError(f"ALCGD optimizer can only be used for `minmax` or `constrain` train types.")
         torch.backends.cudnn.benchmark = True
         opt = ALCGD(
-            max_params=train_taskset.tau,
+            max_params=train_taskset.parameters(),
             min_params=meta_model.parameters(),
             lr_max=config.outer_lr,
             lr_min=config.outer_lr,

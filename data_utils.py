@@ -49,8 +49,9 @@ class InnerPOSDataset(data.Dataset):
         )
 
 
-class CustomPOSLangTaskDataset:
+class CustomPOSLangTaskDataset(nn.Module):
     def __init__(self, datasets, train_type=None):
+        super().__init__()
         self.datasets = {d.lang: d for d in datasets}
         self.id2lang = {idx: lang for idx, lang in enumerate(sorted(self.datasets.keys()))}
         self.lang2id = {lang: idx for idx, lang in self.id2lang.items()}
@@ -275,4 +276,3 @@ def get_pos_labels():
         "VERB",
         "X",
     ]
-
