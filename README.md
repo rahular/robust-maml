@@ -2,9 +2,8 @@
 
 1. Create conda env: `conda create -n pos-bert python=3.7`
 2. Install dependencies: `pip install -r requirements.txt`
-3. Download UD: Use [this link](https://lindat.mff.cuni.cz/repository/xmlui/handle/11234/1-3226) to download all treebanks, unzip and place them inside `data` folder
-4. TODO: Make a script to create the `x` folder inside `data`
-5. Create new configs in the `configs` folder and use them to start training
+3. Run data creation scripts (`make_pos_data.py` and `make_ner_data.py`. See top comments in files for more details)
+5. Copy configs from the `configs` folder and use them to start training(DO NOT modify existing configs)
 
 Trainer usage
 ```
@@ -16,23 +15,20 @@ optional arguments:
   -h, --help            show this help message and exit
   --config_path CONFIG_PATH
                         Path of the config containing training params
-  --train_type {meta,mtl}
-                        Whether to perform MTL or meta-training
 ```
 
 Tester usage
 ```
-usage: tester.py [-h] --test_path TEST_PATH --model_path MODEL_PATH
-                 [-e {meta,full,both}]
+usage: tester.py [-h] --test_lang TEST_LANG --model_path MODEL_PATH
 
 Test POS tagging on various UD datasets
 
 optional arguments:
   -h, --help            show this help message and exit
-  --test_path TEST_PATH
-                        Datasets to test on
+  --test_lang TEST_LANG
+                        Language to test on
   --model_path MODEL_PATH
                         Path of the model to load
-  -e {meta,full,both}, --eval_type {meta,full,both}
-                        Type of evaluation to perform
 ```
+
+The test results will be stored under `<MODEL_PATH/result>`
