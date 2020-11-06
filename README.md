@@ -3,7 +3,7 @@
 1. Create conda env: `conda create -n pos-bert python=3.7`
 2. Install dependencies: `pip install -r requirements.txt`
 3. Run data creation scripts (`make_pos_data.py` and `make_ner_data.py`. See top comments in files for more details)
-5. Copy configs from the `configs` folder and use them to start training(DO NOT modify existing configs)
+5. Copy configs from the `configs` folder and use them to start training (DO NOT modify existing configs)
 
 Trainer usage
 ```
