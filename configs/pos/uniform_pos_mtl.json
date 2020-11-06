@@ -1,6 +1,6 @@
 {
     "model_type": "bert-base-multilingual-cased",
-    "data_dir": "./data/all",
+    "data_dir": "./data/pos/all",
     "max_seq_length": 128,
     "batch_size": 128,
     "num_epochs": 500,

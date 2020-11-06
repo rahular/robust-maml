@@ -1,9 +1,9 @@
 {
     "model_type": "bert-base-multilingual-cased",
-    "data_dir": "./data/all",
+    "data_dir": "./data/ner/all",
     "max_seq_length": 128,
     "batch_size": 128,
-    "num_epochs": 10000,
+    "num_epochs": 2000,
     "patience": -1,
     "seed": 42,
     "max_grad_norm": 5.0,
@@ -16,6 +16,5 @@
     "num_episodes": 32,
     "inner_loop_steps": 4,
     "shots": 50,
-    "train_type": "constrain",
-    "constrain_val": 0.1
+    "train_type": "metabase"
 }

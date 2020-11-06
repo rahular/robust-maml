@@ -1,0 +1,13 @@
+{
+    "model_type": "bert-base-multilingual-cased",
+    "data_dir": "./data/ner/all",
+    "max_seq_length": 128,
+    "batch_size": 128,
+    "num_epochs": 500,
+    "patience": 20,
+    "seed": 42,
+    "max_grad_norm": 5.0,
+    "hidden_dropout_prob": 0.2,
+    "outer_lr": 0.0005,
+    "train_type": "mtl"
+}
