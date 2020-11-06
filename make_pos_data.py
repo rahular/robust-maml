@@ -1,3 +1,11 @@
+"""
+To  download UD, do:
+>> mkdir -p data/ud  && cd data/ud
+>> curl --remote-name-all https://lindat.mff.cuni.cz/repository/xmlui/bitstream/handle/11234/1-3226/ud-treebanks-v2.6.tgz
+>> tar -xf ud-treebanks-v2.6.tgz
+>> python make_pos_data.py (execute this file)
+"""
+
 import os
 import glob
 import pyconll
@@ -31,9 +39,11 @@ def get_info(split, langs):
 
 
 def save_files(paths, split):
+    dst_dir = "./data/pos/all/"
+    os.makedirs(dst_dir, exist_ok=True)
     for path in paths:
         src = path
-        dst = "./data/all/" + path.split("/")[-1].split("-")[0] + f".{split}"
+        dst = dst_dir + path.split("/")[-1].split("-")[0] + f".{split}"
         copyfile(src, dst)
 
 
