@@ -23,14 +23,14 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 @dataclass
-class POSInputFeatures:
+class InputFeatures:
     input_ids: List[int]
     attention_mask: List[int]
     token_type_ids: Optional[List[int]] = None
     label_ids: Optional[List[int]] = None
 
 
-class InnerPOSDataset(data.Dataset):
+class InnerDataset(data.Dataset):
     def __init__(self, data):
         self.input_ids = data["input_ids"]
         self.attention_mask = data["attention_mask"]
@@ -49,7 +49,7 @@ class InnerPOSDataset(data.Dataset):
         )
 
 
-class CustomPOSLangTaskDataset(nn.Module):
+class CustomLangTaskDataset(nn.Module):
     def __init__(self, datasets, train_type=None):
         super().__init__()
         self.datasets = {d.lang: d for d in datasets}
@@ -131,24 +131,22 @@ class CustomPOSLangTaskDataset(nn.Module):
 class POS(data.Dataset):
     def __init__(self, path, max_seq_len, model_type):
         sents, labels = [], []
-        # path should always be of the form <lang>.<split>
+        # filename should always be of the form <lang>.<split>
         self.lang = path.split("/")[-1].split(".")[0]
         tagged_sentences = pyconll.load_from_file(path)
-        label_set = set()
         for ts in tagged_sentences:
             t, l = [], []
             for token in ts:
                 if token.upos and token.form:
                     t.append(token.form)
                     l.append(token.upos)
-            label_set.update(l)
             for idx in range(0, len(ts), max_seq_len):
                 sents.append(t[idx : idx + max_seq_len])
                 labels.append(l[idx : idx + max_seq_len])
 
-        self.label_map = {l: idx for idx, l in enumerate(get_pos_labels())}
+        label_map = {l: idx for idx, l in enumerate(get_pos_labels())}
         tokenizer = AutoTokenizer.from_pretrained(model_type)
-        self.features = self.convert_examples_to_features(sents, labels, max_seq_len, tokenizer)
+        self.features = convert_examples_to_features(sents, labels, label_map, max_seq_len, tokenizer)
 
     def __len__(self):
         return len(self.features)
@@ -167,93 +165,141 @@ class POS(data.Dataset):
     def sample(self):
         return self.__getitem__(random.randint(0, len(self.features) - 1))
 
-    def convert_examples_to_features(
-        self,
-        sents,
-        labels,
-        max_seq_len,
-        tokenizer,
-        cls_token_at_end=False,
-        cls_token="[CLS]",
-        cls_token_segment_id=1,
-        sep_token="[SEP]",
-        sep_token_extra=False,
-        pad_on_left=False,
-        pad_token=0,
-        pad_token_segment_id=0,
-        pad_token_label_id=-100,
-        sequence_a_segment_id=0,
-        mask_padding_with_zero=True,
-    ):
-        """ Loads a data file into a list of `InputFeatures`
-            `cls_token_at_end` define the location of the CLS token:
-                - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
-                - True (XLNet/GPT pattern): A + [SEP] + B + [SEP] + [CLS]
-            `cls_token_segment_id` define the segment id associated to the CLS token (0 for BERT, 2 for XLNet)
-        """
-        features = []
-        for _, (sent, lbl) in enumerate(zip(sents, labels)):
-            tokens = []
-            label_ids = []
-            for word, label in zip(sent, lbl):
-                word_tokens = tokenizer.tokenize(word)
 
-                if len(word_tokens) > 0:
-                    tokens.extend(word_tokens)
-                    label_ids.extend([self.label_map[label]] + [pad_token_label_id] * (len(word_tokens) - 1))
+class NER(data.Dataset):
+    def __init__(self, path, max_seq_len, model_type):
+        # path should always be of the form <lang>.<split>
+        self.lang = path.split("/")[-1].split(".")[0]
+        sents, labels = [], []
+        words, tags = [], []
+        with open(path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    assert len(words) == len(tags)
+                    for idx in range(0, len(tags), max_seq_len):
+                        sents.append(words[idx : idx + max_seq_len])
+                        labels.append(tags[idx : idx + max_seq_len])
+                    words, tags = [], []
+                else:
+                    parts = line.split()
+                    words.append(parts[0])
+                    tags.append(parts[-1])
+            if len(words) > 0:
+                assert len(words) == len(tags)
+                for idx in range(0, len(tags), max_seq_len):
+                    sents.append(words[idx : idx + max_seq_len])
+                    labels.append(tags[idx : idx + max_seq_len])
 
-            # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
-            special_tokens_count = tokenizer.num_special_tokens_to_add()
-            if len(tokens) > max_seq_len - special_tokens_count:
-                tokens = tokens[: (max_seq_len - special_tokens_count)]
-                label_ids = label_ids[: (max_seq_len - special_tokens_count)]
+        label_map = {l: idx for idx, l in enumerate(get_ner_labels())}
+        tokenizer = AutoTokenizer.from_pretrained(model_type)
+        self.features = convert_examples_to_features(sents, labels, label_map, max_seq_len, tokenizer)
 
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, idx):
+        return (
+            {
+                "input_ids": self.features[idx].input_ids,
+                "attention_mask": self.features[idx].attention_mask,
+                "token_type_ids": self.features[idx].token_type_ids,
+                "label_ids": self.features[idx].label_ids,
+            },
+            self.lang,
+        )
+
+    def sample(self):
+        return self.__getitem__(random.randint(0, len(self.features) - 1))
+
+
+def convert_examples_to_features(
+    sents,
+    labels,
+    label_map,
+    max_seq_len,
+    tokenizer,
+    cls_token_at_end=False,
+    cls_token="[CLS]",
+    cls_token_segment_id=1,
+    sep_token="[SEP]",
+    sep_token_extra=False,
+    pad_on_left=False,
+    pad_token=0,
+    pad_token_segment_id=0,
+    pad_token_label_id=-100,
+    sequence_a_segment_id=0,
+    mask_padding_with_zero=True,
+):
+    """ Loads a data file into a list of `InputFeatures`
+        `cls_token_at_end` define the location of the CLS token:
+            - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
+            - True (XLNet/GPT pattern): A + [SEP] + B + [SEP] + [CLS]
+        `cls_token_segment_id` define the segment id associated to the CLS token (0 for BERT, 2 for XLNet)
+    """
+    features = []
+    for _, (sent, lbl) in enumerate(zip(sents, labels)):
+        tokens = []
+        label_ids = []
+        for word, label in zip(sent, lbl):
+            word_tokens = tokenizer.tokenize(word)
+
+            if len(word_tokens) > 0:
+                tokens.extend(word_tokens)
+                label_ids.extend([label_map[label]] + [pad_token_label_id] * (len(word_tokens) - 1))
+
+        # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
+        special_tokens_count = tokenizer.num_special_tokens_to_add()
+        if len(tokens) > max_seq_len - special_tokens_count:
+            tokens = tokens[: (max_seq_len - special_tokens_count)]
+            label_ids = label_ids[: (max_seq_len - special_tokens_count)]
+
+        tokens += [sep_token]
+        label_ids += [pad_token_label_id]
+        if sep_token_extra:
+            # roberta uses an extra separator b/w pairs of sentences
             tokens += [sep_token]
             label_ids += [pad_token_label_id]
-            if sep_token_extra:
-                # roberta uses an extra separator b/w pairs of sentences
-                tokens += [sep_token]
-                label_ids += [pad_token_label_id]
-            segment_ids = [sequence_a_segment_id] * len(tokens)
+        segment_ids = [sequence_a_segment_id] * len(tokens)
 
-            if cls_token_at_end:
-                tokens += [cls_token]
-                label_ids += [pad_token_label_id]
-                segment_ids += [cls_token_segment_id]
-            else:
-                tokens = [cls_token] + tokens
-                label_ids = [pad_token_label_id] + label_ids
-                segment_ids = [cls_token_segment_id] + segment_ids
+        if cls_token_at_end:
+            tokens += [cls_token]
+            label_ids += [pad_token_label_id]
+            segment_ids += [cls_token_segment_id]
+        else:
+            tokens = [cls_token] + tokens
+            label_ids = [pad_token_label_id] + label_ids
+            segment_ids = [cls_token_segment_id] + segment_ids
 
-            input_ids = tokenizer.convert_tokens_to_ids(tokens)
-            input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
-            padding_length = max_seq_len - len(input_ids)
-            if pad_on_left:
-                input_ids = ([pad_token] * padding_length) + input_ids
-                input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
-                segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
-                label_ids = ([pad_token_label_id] * padding_length) + label_ids
-            else:
-                input_ids += [pad_token] * padding_length
-                input_mask += [0 if mask_padding_with_zero else 1] * padding_length
-                segment_ids += [pad_token_segment_id] * padding_length
-                label_ids += [pad_token_label_id] * padding_length
+        input_ids = tokenizer.convert_tokens_to_ids(tokens)
+        input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
+        padding_length = max_seq_len - len(input_ids)
+        if pad_on_left:
+            input_ids = ([pad_token] * padding_length) + input_ids
+            input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
+            segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
+            label_ids = ([pad_token_label_id] * padding_length) + label_ids
+        else:
+            input_ids += [pad_token] * padding_length
+            input_mask += [0 if mask_padding_with_zero else 1] * padding_length
+            segment_ids += [pad_token_segment_id] * padding_length
+            label_ids += [pad_token_label_id] * padding_length
 
-            assert len(input_ids) == max_seq_len
-            assert len(input_mask) == max_seq_len
-            assert len(segment_ids) == max_seq_len
-            assert len(label_ids) == max_seq_len
+        assert len(input_ids) == max_seq_len
+        assert len(input_mask) == max_seq_len
+        assert len(segment_ids) == max_seq_len
+        assert len(label_ids) == max_seq_len
 
-            if "token_type_ids" not in tokenizer.model_input_names:
-                segment_ids = None
+        if "token_type_ids" not in tokenizer.model_input_names:
+            segment_ids = None
 
-            features.append(
-                POSInputFeatures(
-                    input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids, label_ids=label_ids
-                )
+        features.append(
+            InputFeatures(
+                input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids, label_ids=label_ids
             )
+        )
 
-        return features
+    return features
 
 
 def get_pos_labels():
@@ -276,3 +322,8 @@ def get_pos_labels():
         "VERB",
         "X",
     ]
+
+
+def get_ner_labels():
+    return ["B-LOC", "B-ORG", "B-PER", "I-LOC", "I-ORG", "I-PER", "O"]
+

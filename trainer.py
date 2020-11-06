@@ -62,8 +62,8 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
     save_dir = "./models/{}".format(utils.get_savedir_name())
     tb_writer = SummaryWriter(os.path.join(save_dir, "logs"))
 
-    train_taskset = data_utils.CustomPOSLangTaskDataset(train_set, train_type=config.train_type)
-    dev_taskset = data_utils.CustomPOSLangTaskDataset(dev_set)
+    train_taskset = data_utils.CustomLangTaskDataset(train_set, train_type=config.train_type)
+    dev_taskset = data_utils.CustomLangTaskDataset(dev_set)
     num_epochs = config.num_epochs
     meta_model = l2l.algorithms.MAML(clf_head, lr=config.inner_lr, first_order=config.is_fomaml)
     tqdm_bar = tqdm(range(num_epochs))
@@ -74,7 +74,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
     if config.optim == "adam":
         opt_params = meta_model.parameters()
         if config.train_type != "metabase":
-            opt_params = list(opt_params) + train_taskset.parameters()
+            opt_params = list(opt_params) + list(train_taskset.parameters())
         opt = Adam(opt_params, lr=config.outer_lr)
     elif config.optim == "alcgd":
         if config.train_type == "metabase":
@@ -103,7 +103,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
 
             for _ in range(inner_loop_steps):
                 train_loader = DataLoader(
-                    data_utils.InnerPOSDataset(train_task), batch_size=task_bs, shuffle=False, num_workers=0
+                    data_utils.InnerDataset(train_task), batch_size=task_bs, shuffle=False, num_workers=0
                 )
                 train_error, train_metrics = utils.compute_loss_metrics(
                     train_loader, bert_model, learner, label_map=label_map
@@ -116,7 +116,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 l2l.algorithms.maml_update(learner, config.inner_lr, grads)
 
             dev_loader = DataLoader(
-                data_utils.InnerPOSDataset(dev_task), batch_size=task_bs, shuffle=False, num_workers=0
+                data_utils.InnerDataset(dev_task), batch_size=task_bs, shuffle=False, num_workers=0
             )
             dev_error, dev_metrics = utils.compute_loss_metrics(dev_loader, bert_model, learner, label_map=label_map)
             if config.train_type == "minmax":
@@ -245,12 +245,19 @@ def main():
     train_paths = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith("train")])
     dev_paths = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith("dev")])
 
+    if "/pos/" in data_dir:
+        data_class = data_utils.POS
+        label_map = {idx: l for idx, l in enumerate(data_utils.get_pos_labels())}
+    elif "/ner/" in data_dir:
+        data_class = data_utils.NER
+        label_map = {idx: l for idx, l in enumerate(data_utils.get_ner_labels())}
+    else:
+        raise ValueError(f"Unknown task or incorrect `config.data_dir`: {config.data_dir}")
     logging.info("Creating train sets...")
-    train_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in tqdm(train_paths)]
+    train_set = [data_class(p, config.max_seq_length, config.model_type) for p in tqdm(train_paths)]
     logging.info("Creating dev sets...")
-    dev_set = [data_utils.POS(p, config.max_seq_length, config.model_type) for p in tqdm(dev_paths)]
+    dev_set = [data_class(p, config.max_seq_length, config.model_type) for p in tqdm(dev_paths)]
 
-    label_map = {idx: l for idx, l in enumerate(data_utils.get_pos_labels())}
     bert_model = model_utils.BERT(config)
     bert_model = bert_model.eval().to(DEVICE)
     clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size())

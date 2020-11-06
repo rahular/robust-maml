@@ -43,9 +43,17 @@ def main():
     config = model_utils.Config(config_path)
     torch.manual_seed(config.seed)
 
-    data_dir = "./data/indomain"
+    data_dir = "./data/pos/indomain"
     test_paths = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith(".test")]
-    label_map = {idx: l for idx, l in enumerate(data_utils.get_pos_labels())}
+    
+    if "/pos/" in data_dir:
+        data_class = data_utils.POS
+        label_map = {idx: l for idx, l in enumerate(data_utils.get_pos_labels())}
+    elif "/ner/" in data_dir:
+        data_class = data_utils.NER
+        label_map = {idx: l for idx, l in enumerate(data_utils.get_ner_labels())}
+    else:
+        raise ValueError(f"Unknown task or incorrect `config.data_dir`: {config.data_dir}")
 
     bert_model = model_utils.BERT(config)
     bert_model = bert_model.eval().to(DEVICE)
@@ -57,7 +65,7 @@ def main():
     for idx, test_path in enumerate(sorted(test_paths)):
         dataset_name = test_path.split("/")[-1].split(".")[0]
         logger.info(f"Testing {dataset_name}...")
-        test_set = data_utils.POS(test_path, config.max_seq_length, config.model_type)
+        test_set = data_class(test_path, config.max_seq_length, config.model_type)
         r = zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config)
         summary_metrics.loc[idx] = [dataset_name, r["precision"], r["recall"], r["f1"]]
 

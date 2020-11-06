@@ -30,7 +30,7 @@ def zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config):
 
 
 def evaluate(test_set, label_map, bert_model, clf_head, config, shots):
-    task = data_utils.CustomPOSLangTaskDataset([test_set])
+    task = data_utils.CustomLangTaskDataset([test_set])
     num_episodes = config.num_episodes
     task_bs = config.task_batch_size
     inner_loop_steps = config.inner_loop_steps
@@ -53,7 +53,7 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, shots):
         support_task, query_task = task.test_sample(k=shots)
         for _ in range(inner_loop_steps):
             support_loader = DataLoader(
-                data_utils.InnerPOSDataset(support_task), batch_size=task_bs, shuffle=True, num_workers=0
+                data_utils.InnerDataset(support_task), batch_size=task_bs, shuffle=True, num_workers=0
             )
             support_error, _ = utils.compute_loss_metrics(support_loader, bert_model, learner, label_map)
             grads = torch.autograd.grad(support_error.mean(), learner.parameters(), create_graph=True, allow_unused=True)
@@ -61,7 +61,7 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, shots):
             task_support_error += support_error
 
         query_loader = DataLoader(
-            data_utils.InnerPOSDataset(query_task), batch_size=task_bs, shuffle=False, num_workers=0
+            data_utils.InnerDataset(query_task), batch_size=task_bs, shuffle=False, num_workers=0
         )
         query_error, metrics = utils.compute_loss_metrics(query_loader, bert_model, learner, label_map, grad_required=False)
         tqdm_bar.set_description("Query Loss: {:.3f}".format(query_error.mean().item()))
@@ -101,8 +101,16 @@ def main():
 
     data_dir = config.data_dir
     test_path = os.path.join(data_dir, f"{args.test_lang}.test")
-    test_set = data_utils.POS(test_path, config.max_seq_length, config.model_type)
-    label_map = {idx: l for idx, l in enumerate(data_utils.get_pos_labels())}
+
+    if "/pos/" in data_dir:
+        data_class = data_utils.POS
+        label_map = {idx: l for idx, l in enumerate(data_utils.get_pos_labels())}
+    elif "/ner/" in data_dir:
+        data_class = data_utils.NER
+        label_map = {idx: l for idx, l in enumerate(data_utils.get_ner_labels())}
+    else:
+        raise ValueError(f"Unknown task or incorrect `config.data_dir`: {config.data_dir}")
+    test_set = data_class(test_path, config.max_seq_length, config.model_type)
 
     bert_model = model_utils.BERT(config)
     bert_model = bert_model.eval().to(DEVICE)
