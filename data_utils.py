@@ -129,8 +129,9 @@ class CustomLangTaskDataset(nn.Module):
 
 
 class POS(data.Dataset):
-    def __init__(self, path, max_seq_len, model_type):
+    def __init__(self, path, max_seq_len, model_type, max_count=10**6):
         sents, labels = [], []
+        count = 0
         # filename should always be of the form <lang>.<split>
         self.lang = path.split("/")[-1].split(".")[0]
         tagged_sentences = pyconll.load_from_file(path)
@@ -143,6 +144,9 @@ class POS(data.Dataset):
             for idx in range(0, len(ts), max_seq_len):
                 sents.append(t[idx : idx + max_seq_len])
                 labels.append(l[idx : idx + max_seq_len])
+            count += 1
+            if count > max_count:
+                break
 
         label_map = {l: idx for idx, l in enumerate(get_pos_labels())}
         tokenizer = AutoTokenizer.from_pretrained(model_type)
@@ -167,11 +171,12 @@ class POS(data.Dataset):
 
 
 class NER(data.Dataset):
-    def __init__(self, path, max_seq_len, model_type):
+    def __init__(self, path, max_seq_len, model_type, max_count=10**6):
         # path should always be of the form <lang>.<split>
         self.lang = path.split("/")[-1].split(".")[0]
         sents, labels = [], []
         words, tags = [], []
+        count = 0
         with open(path, "r") as f:
             for line in f:
                 line = line.strip()
@@ -181,6 +186,9 @@ class NER(data.Dataset):
                         sents.append(words[idx : idx + max_seq_len])
                         labels.append(tags[idx : idx + max_seq_len])
                     words, tags = [], []
+                    count += 1
+                    if count > max_count:
+                        break
                 else:
                     parts = line.split()
                     words.append(parts[0])
