@@ -9,6 +9,7 @@ import torch.nn as nn
 import data_utils
 
 from datetime import datetime
+from collections import OrderedDict
 from torch.utils import data
 from seqeval.metrics import f1_score, precision_score, recall_score
 
@@ -27,6 +28,20 @@ def get_savedir_name():
         savedir += ("-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4)))
         logging.info(f"All models will be saved at: {savedir}")
     return savedir
+
+
+def set_savedir_name(name):
+    global savedir
+    savedir = name
+
+
+def clean_keys(state_dict):
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        if k.startswith("module."):
+            k = k[7:]
+        new_state_dict[k] =  v
+    return new_state_dict
 
 
 def compute_metrics(predictions, label_ids, label_map):
@@ -52,7 +67,7 @@ def compute_metrics(predictions, label_ids, label_map):
 def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=True):
     loss = None
     gold, preds = None, None
-    for batch, features in enumerate(loader):
+    for features in loader:
         # it is done this way to be consistent with both outer (regular) and inner (meta) dataloaders
         input_ids, attention_mask, token_type_ids, labels = features[0], features[1], features[2], features[3]
         with torch.no_grad():
