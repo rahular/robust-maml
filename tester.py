@@ -92,9 +92,12 @@ def init_args():
 def main():
     args = init_args()
     config_path = os.path.join(args.model_path, "config.json")
-    load_path = os.path.join(args.model_path, "best_model.th")
+    load_encoder_path = os.path.join(args.model_path, "best_encoder.th")
+    load_head_path = os.path.join(args.model_path, "best_model.th")
     logging.info("Loading config from path: {}".format(config_path))
-    logging.info("Loading model from path: {}".format(load_path))
+    if os.path.isfile(load_encoder_path):
+        logging.info("Loading encoder from path: {}".format(load_encoder_path))
+    logging.info("Loading model from path: {}".format(load_head_path))
 
     config = model_utils.Config(config_path)
     torch.manual_seed(config.seed)
@@ -113,10 +116,12 @@ def main():
     test_set = data_class(test_path, config.max_seq_length, config.model_type)
 
     bert_model = model_utils.BERT(config)
+    if os.path.isfile(load_encoder_path):
+        bert_model.load_state_dict(utils.clean_keys(torch.load(load_encoder_path)))
     bert_model = bert_model.eval().to(DEVICE)
     clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size())
-    clf_head.load_state_dict(torch.load(load_path))
-    clf_head = clf_head.to(DEVICE)
+    clf_head.load_state_dict(utils.clean_keys(torch.load(load_head_path)))
+    clf_head = clf_head.eval().to(DEVICE)
 
     # shots = args.shots
     shots = [0, 1, 2, 5, 10]

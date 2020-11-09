@@ -15,6 +15,7 @@ from tqdm import tqdm
 from shutil import copyfile
 
 from torch.optim import Adam
+from transformers.optimization import AdamW
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import ConcatDataset, DataLoader
 
@@ -37,36 +38,38 @@ def init_args():
         required=True,
     )
     parser.add_argument(
-        "--train_type",
-        dest="train_type",
+        "--load_from",
+        dest="load_from",
         type=str,
-        help="Whether to perform MTL or meta-training",
-        choices=["meta", "mtl"],
+        help="Warm start from n existing model path",
+        default=None,
         required=False,
-        default="meta",
     )
     return parser.parse_args()
 
 
-def save(model, optimizer, config_path, last_epoch):
+def save(model, optimizer, config_path, last_epoch, encoder=None):
     save_dir = "./models/{}".format(utils.get_savedir_name())
     os.makedirs(save_dir, exist_ok=True)
-    # logging.info("Saving model checkpoint to %s", save_dir)
+    # logger.info("Saving model checkpoint to %s", save_dir)
     copyfile(config_path, "{}/config.json".format(save_dir))
-    model_to_save = model.module if hasattr(model, "module") else model
-    torch.save(model_to_save.state_dict(), os.path.join(save_dir, "best_model.th"))
+    to_save = model.module if hasattr(model,  "module") else model
+    torch.save(to_save.state_dict(), os.path.join(save_dir, "best_model.th"))
     torch.save({"optimizer": optimizer.state_dict(), "last_epoch": last_epoch}, os.path.join(save_dir, "optim.th"))
+    if encoder:
+        to_save = encoder.module if hasattr(encoder,  "module") else encoder
+        torch.save(to_save.state_dict(), os.path.join(save_dir, "best_encoder.th"))
 
 
 def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head):
     save_dir = "./models/{}".format(utils.get_savedir_name())
     tb_writer = SummaryWriter(os.path.join(save_dir, "logs"))
+    bert_model = bert_model.eval()
 
     train_taskset = data_utils.CustomLangTaskDataset(train_set, train_type=config.train_type)
     dev_taskset = data_utils.CustomLangTaskDataset(dev_set)
     num_epochs = config.num_epochs
     meta_model = l2l.algorithms.MAML(clf_head, lr=config.inner_lr, first_order=config.is_fomaml)
-    tqdm_bar = tqdm(range(num_epochs))
     num_episodes = config.num_episodes
     task_bs = config.task_batch_size
     inner_loop_steps = config.inner_loop_steps
@@ -91,7 +94,13 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
         raise ValueError(f"Invalid option: {config.optim} for `config.optim`")
 
     best_dev_error = np.inf
+    if args.load_from:
+        state_obj = torch.load(os.path.join(args.load_from, "optim.th"))
+        opt.load_state_dict(state_obj["optimizer"])
+        num_epochs = num_epochs - state_obj["last_epoch"]
+
     patience_ctr = 0
+    tqdm_bar = tqdm(range(num_epochs))
     for iteration in tqdm_bar:
         dev_iteration_error = 0.0
         train_iteration_error = 0.0
@@ -118,7 +127,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             dev_loader = DataLoader(
                 data_utils.InnerDataset(dev_task), batch_size=task_bs, shuffle=False, num_workers=0
             )
-            dev_error, dev_metrics = utils.compute_loss_metrics(dev_loader, bert_model, learner, label_map=label_map)
+            dev_error, dev_metrics = utils.compute_loss_metrics(dev_loader, bert_model, learner, label_map)
             if config.train_type == "minmax":
                 dev_error *= imps
                 dev_error = dev_error.sum()
@@ -150,14 +159,14 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             opt.step(loss=dev_iteration_error)
 
         if dev_iteration_error < best_dev_error:
-            # logging.info("Found new best model!")
+            logger.info("Found new best model!")
             best_dev_error = dev_iteration_error
             save(meta_model, opt, args.config_path, iteration)
             patience_ctr = 0
         else:
             patience_ctr += 1
             if patience_ctr == config.patience:
-                logging.info("Ran out of patience. Stopping training early...")
+                logger.info("Ran out of patience. Stopping training early...")
                 break
 
         if config.train_type != "metabase" and iteration % 10 == 0:
@@ -165,8 +174,8 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             with open(os.path.join(save_dir, "minmax_dist.npy"), "wb") as f:
                 np.save(f, train_taskset.tau.detach().cpu().numpy())
 
-    logging.info(f"Best validation loss = {best_dev_error}")
-    logging.info("Best model saved at: {}".format(utils.get_savedir_name()))
+    logger.info(f"Best validation loss = {best_dev_error}")
+    logger.info("Best model saved at: {}".format(utils.get_savedir_name()))
 
 
 def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head):
@@ -186,51 +195,87 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
         dataset=dev_set, batch_size=config.batch_size, collate_fn=utils.pos_collate_fn, shuffle=False,
     )
     num_epochs = config.num_epochs
-    opt = Adam(clf_head.parameters(), lr=config.outer_lr)
-
-    best_dev_loss = np.inf
-    for epoch in range(num_epochs):
-        running_loss = 0.0
-        epoch_iterator = tqdm(train_loader, desc="Training")
-        clf_head = clf_head.train()
-        for train_step, (input_ids, attention_mask, token_type_ids, labels, _) in enumerate(epoch_iterator):
-            opt.zero_grad()
-            with torch.no_grad():
-                bert_output = bert_model(input_ids, attention_mask, token_type_ids)
-            output = clf_head(bert_output, labels=labels, attention_mask=attention_mask)
-            output.loss.backward()
-            torch.nn.utils.clip_grad_norm_(clf_head.parameters(), config.max_grad_norm)
-            opt.step()
-            running_loss += output.loss.item()
-        logger.info(f"Finished epoch {epoch+1} with avg. training loss: {running_loss/(train_step + 1)}")
-
+    no_decay = ["bias", "LayerNorm.weight"]
+    optimizer_grouped_parameters = [
+        {
+            "params": [
+                p
+                for n, p in list(bert_model.named_parameters()) + list(clf_head.named_parameters())
+                if not any(nd in n for nd in no_decay)
+            ],
+            "weight_decay": config.weight_decay,
+        },
+        {
+            "params": [
+                p
+                for n, p in list(bert_model.named_parameters()) + list(clf_head.named_parameters())
+                if any(nd in n for nd in no_decay)
+            ],
+            "weight_decay": 0.0,
+        },
+    ]
+    opt = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.outer_lr)
+    best_dev_f1 = np.inf
+    if args.load_from:
+        state_obj = torch.load(os.path.join(args.load_from, "optim.th"))
+        opt.load_state_dict(state_obj["optimizer"])
+        num_epochs = num_epochs - state_obj["last_epoch"]
+        bert_model = bert_model.eval()
         clf_head = clf_head.eval()
         dev_loss, dev_metrics = utils.compute_loss_metrics(
             dev_loader, bert_model, clf_head, label_map, grad_required=False
         )
-        logging.info(
-            "Dev. metrics (p/r/f): {:.3f} {:.3f} {:.3f}".format(
-                dev_metrics["precision"], dev_metrics["recall"], dev_metrics["f1"]
-            )
-        )
-        tb_writer.add_scalar("metrics/loss", dev_loss, epoch)
-        tb_writer.add_scalar("metrics/precision", dev_metrics["precision"], epoch)
-        tb_writer.add_scalar("metrics/recall", dev_metrics["recall"], epoch)
-        tb_writer.add_scalar("metrics/f1", dev_metrics["f1"], epoch)
+        best_dev_f1 = dev_metrics["f1"]
 
-        if dev_loss < best_dev_loss:
-            # logging.info("Found new best model!")
-            best_dev_loss = dev_loss
-            save(clf_head, opt, args.config_path, epoch)
-            patience_ctr = 0
-        else:
-            patience_ctr += 1
-            if patience_ctr == config.patience:
-                logging.info("Ran out of patience. Stopping training early...")
-                break
+    for epoch in range(num_epochs):
+        running_loss = 0.0
+        epoch_iterator = tqdm(train_loader, desc="Training")
+        for train_step, (input_ids, attention_mask, token_type_ids, labels, _) in enumerate(epoch_iterator):
+            # train
+            bert_model = bert_model.train()
+            clf_head = clf_head.train()
+            opt.zero_grad()
+            bert_output = bert_model(input_ids, attention_mask, token_type_ids)
+            output = clf_head(bert_output, labels=labels, attention_mask=attention_mask)
+            loss = output.loss.mean()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(bert_model.parameters(), config.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(clf_head.parameters(), config.max_grad_norm)
+            opt.step()
+            running_loss += loss.item()
+            # eval
+            if (train_step + 1) % config.eval_freq == 0:
+                bert_model = bert_model.eval()
+                clf_head = clf_head.eval()
+                dev_loss, dev_metrics = utils.compute_loss_metrics(
+                    dev_loader, bert_model, clf_head, label_map, grad_required=False
+                )
+                dev_loss = dev_loss.mean()
+                logger.info(
+                    "Dev. metrics (p/r/f): {:.3f} {:.3f} {:.3f}".format(
+                        dev_metrics["precision"], dev_metrics["recall"], dev_metrics["f1"]
+                    )
+                )
+                tb_writer.add_scalar("metrics/loss", dev_loss, epoch)
+                tb_writer.add_scalar("metrics/precision", dev_metrics["precision"], epoch)
+                tb_writer.add_scalar("metrics/recall", dev_metrics["recall"], epoch)
+                tb_writer.add_scalar("metrics/f1", dev_metrics["f1"], epoch)
 
-    logging.info(f"Best validation loss = {best_dev_loss}")
-    logging.info("Best model saved at: {}".format(utils.get_savedir_name()))
+                if dev_metrics["f1"] > best_dev_f1:
+                    logger.info("Found new best model!")
+                    best_dev_f1 = dev_metrics["f1"]
+                    save(clf_head, opt, args.config_path, epoch, bert_model)
+                    patience_ctr = 0
+                else:
+                    patience_ctr += 1
+                    if patience_ctr == config.patience:
+                        logger.info("Ran out of patience. Stopping training early...")
+                        break
+
+        logger.info(f"Finished epoch {epoch+1} with avg. training loss: {running_loss/(train_step + 1)}")
+
+    logger.info(f"Best validation f1 = {best_dev_f1}")
+    logger.info("Best model saved at: {}".format(utils.get_savedir_name()))
 
 
 def main():
@@ -253,14 +298,27 @@ def main():
         label_map = {idx: l for idx, l in enumerate(data_utils.get_ner_labels())}
     else:
         raise ValueError(f"Unknown task or incorrect `config.data_dir`: {config.data_dir}")
-    logging.info("Creating train sets...")
-    train_set = [data_class(p, config.max_seq_length, config.model_type) for p in tqdm(train_paths)]
-    logging.info("Creating dev sets...")
-    dev_set = [data_class(p, config.max_seq_length, config.model_type) for p in tqdm(dev_paths)]
+
+    train_max_examples = config.train_max_examples
+    dev_max_examples = config.dev_max_examples
+    logger.info("Creating train sets...")
+    train_set = [data_class(p, config.max_seq_length, config.model_type, train_max_examples) for p in tqdm(train_paths)]
+    logger.info("Creating dev sets...")
+    dev_set = [data_class(p, config.max_seq_length, config.model_type,  dev_max_examples) for p in tqdm(dev_paths)]
 
     bert_model = model_utils.BERT(config)
-    bert_model = bert_model.eval().to(DEVICE)
     clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size())
+    if args.load_from:
+        logger.info(f"Resuming training with weights from {args.load_from}")
+        utils.set_savedir_name(args.load_from)
+        clf_head.load_state_dict(torch.load(os.path.join(args.load_from, "best_model.th")))
+    if args.load_from or hasattr(config, "encoder_ckpt"):
+        if args.load_from and hasattr(config, "encoder_ckpt"):
+            raise ValueError('Conflict: both `load_from` and `encoder_ckpt` set.')
+        load_path = args.load_from if not hasattr(config, "encoder_ckpt") else config.encoder_ckpt
+        logger.info(f"Using encoder weights from {load_path}")
+        bert_model.load_state_dict(torch.load(os.path.join(load_path, "best_encoder.th")))
+    bert_model = bert_model.to(DEVICE)
     clf_head = clf_head.to(DEVICE)
 
     if config.train_type == "mtl":
