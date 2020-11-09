@@ -17,5 +17,7 @@
     "inner_loop_steps": 4,
     "shots": 50,
     "train_type": "constrain",
-    "constrain_val": 0.1
+    "constrain_val": 0.1,
+    "train_max_examples": 1000000,
+    "dev_max_examples": 1000000
 }
