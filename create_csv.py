@@ -19,24 +19,32 @@ def main():
     result_path = os.path.join(args.model_path, "result")
     files = [os.path.join(result_path, f) for f in os.listdir(result_path) if f.endswith("json")]
 
-    datasets, k0, k1, k2, k5, k10 = [], [], [], [], [], []
+    datasets, k0, k1, s1, k2, s2, k5, s5, k10, s10 = [], [], [], [], [], [], [], [], [],  []
     for file_ in tqdm.tqdm(sorted(files)):
         with open(file_, "r") as f:
             data = json.load(f)
             datasets.append(file_.split("/")[-1].split(".")[0])
             k0.append(round(data["0"]["f1"] * 100, 2))
             k1.append(round(data["1"]["f"] * 100, 2))
+            s1.append(round(data["1"]["f_stdev"] * 100, 2))
             k2.append(round(data["2"]["f"] * 100, 2))
+            s2.append(round(data["2"]["f_stdev"] * 100, 2))
             k5.append(round(data["5"]["f"] * 100, 2))
+            s5.append(round(data["5"]["f_stdev"] * 100, 2))
             k10.append(round(data["10"]["f"] * 100, 2))
+            s10.append(round(data["10"]["f_stdev"] * 100, 2))
 
     df = pd.DataFrame()
     df["lang"] = datasets
     df["k=0"] = k0
     df["k=1"] = k1
+    df["1_std"] = s1
     df["k=2"] = k2
+    df["2_std"] = s2
     df["k=5"] = k5
+    df["5_std"] = s5
     df["k=10"] = k10
+    df["10_std"] = s10
 
     df.to_csv(os.path.join(result_path, "combined_result.csv"))
 
