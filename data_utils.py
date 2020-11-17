@@ -1,3 +1,4 @@
+import os
 import torch
 import pyconll
 import logging
@@ -6,6 +7,7 @@ import torch.nn as nn
 import pandas as pd
 import learn2learn as l2l
 
+from tqdm import tqdm
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import List, Optional
@@ -129,28 +131,34 @@ class CustomLangTaskDataset(nn.Module):
 
 
 class POS(data.Dataset):
-    def __init__(self, path, max_seq_len, model_type, max_count=10**6):
+    def __init__(self, path, max_seq_len, model_type, max_count=10 ** 6):
         sents, labels = [], []
         count = 0
         # filename should always be of the form <lang>.<split>
         self.lang = path.split("/")[-1].split(".")[0]
-        tagged_sentences = pyconll.load_from_file(path)
-        for ts in tagged_sentences:
-            t, l = [], []
-            for token in ts:
-                if token.upos and token.form:
-                    t.append(token.form)
-                    l.append(token.upos)
-            for idx in range(0, len(ts), max_seq_len):
-                sents.append(t[idx : idx + max_seq_len])
-                labels.append(l[idx : idx + max_seq_len])
-            count += 1
-            if count > max_count:
-                break
-
-        label_map = {l: idx for idx, l in enumerate(get_pos_labels())}
-        tokenizer = AutoTokenizer.from_pretrained(model_type)
-        self.features = convert_examples_to_features(sents, labels, label_map, max_seq_len, tokenizer)
+        cached_features_file = path + f".{max_count}.th"
+        if os.path.exists(cached_features_file):
+            logger.info(f"Loading features from cached file {cached_features_file}")
+            self.features = torch.load(cached_features_file)
+        else:
+            logger.info(f"Saving features into cached file {cached_features_file}")
+            tagged_sentences = pyconll.load_from_file(path)
+            for ts in tagged_sentences:
+                t, l = [], []
+                for token in ts:
+                    if token.upos and token.form:
+                        t.append(token.form)
+                        l.append(token.upos)
+                for idx in range(0, len(ts), max_seq_len):
+                    sents.append(t[idx : idx + max_seq_len])
+                    labels.append(l[idx : idx + max_seq_len])
+                count += 1
+                if count > max_count:
+                    break
+            label_map = {l: idx for idx, l in enumerate(get_pos_labels())}
+            tokenizer = AutoTokenizer.from_pretrained(model_type)
+            self.features = convert_examples_to_features(sents, labels, label_map, max_seq_len, tokenizer)
+            torch.save(self.features, cached_features_file)
 
     def __len__(self):
         return len(self.features)
@@ -171,37 +179,45 @@ class POS(data.Dataset):
 
 
 class NER(data.Dataset):
-    def __init__(self, path, max_seq_len, model_type, max_count=10**6):
+    def __init__(self, path, max_seq_len, model_type, max_count=10 ** 6):
         # path should always be of the form <lang>.<split>
         self.lang = path.split("/")[-1].split(".")[0]
         sents, labels = [], []
         words, tags = [], []
-        count = 0
-        with open(path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
+        cached_features_file = path + f".{max_count}.th"
+        if os.path.exists(cached_features_file):
+            logger.info(f"Loading features from cached file {cached_features_file}")
+            self.features = torch.load(cached_features_file)
+        else:
+            logger.info(f"Saving features into cached file {cached_features_file}")
+            with open(path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        assert len(words) == len(tags)
+                        for idx in range(0, len(tags), max_seq_len):
+                            sents.append(words[idx : idx + max_seq_len])
+                            labels.append(tags[idx : idx + max_seq_len])
+                        words, tags = [], []
+                        # we don't count and break here, because the first k examples are not necessarily
+                        # the best as they may come only from a handful of wiki docs. 
+                    else:
+                        parts = line.split()
+                        words.append(parts[0])
+                        tags.append(parts[-1])
+                if len(words) > 0:
                     assert len(words) == len(tags)
                     for idx in range(0, len(tags), max_seq_len):
                         sents.append(words[idx : idx + max_seq_len])
                         labels.append(tags[idx : idx + max_seq_len])
-                    words, tags = [], []
-                    count += 1
-                    if count > max_count:
-                        break
-                else:
-                    parts = line.split()
-                    words.append(parts[0])
-                    tags.append(parts[-1])
-            if len(words) > 0:
-                assert len(words) == len(tags)
-                for idx in range(0, len(tags), max_seq_len):
-                    sents.append(words[idx : idx + max_seq_len])
-                    labels.append(tags[idx : idx + max_seq_len])
-
-        label_map = {l: idx for idx, l in enumerate(get_ner_labels())}
-        tokenizer = AutoTokenizer.from_pretrained(model_type)
-        self.features = convert_examples_to_features(sents, labels, label_map, max_seq_len, tokenizer)
+            concat_list = list(zip(sents, labels))
+            random.shuffle(concat_list)
+            sents, labels = zip(*concat_list)
+            sents, labels = list(sents[:max_count]), list(labels[:max_count])
+            label_map = {l: idx for idx, l in enumerate(get_ner_labels())}
+            tokenizer = AutoTokenizer.from_pretrained(model_type)
+            self.features = convert_examples_to_features(sents, labels, label_map, max_seq_len, tokenizer)
+            torch.save(self.features, cached_features_file)
 
     def __len__(self):
         return len(self.features)
