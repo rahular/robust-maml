@@ -12,6 +12,7 @@ import data_utils
 import model_utils
 
 from tqdm import tqdm
+from collections import defaultdict, deque
 from shutil import copyfile
 
 from torch.optim import Adam
@@ -53,11 +54,11 @@ def save(model, optimizer, config_path, last_epoch, encoder=None):
     os.makedirs(save_dir, exist_ok=True)
     # logger.info("Saving model checkpoint to %s", save_dir)
     copyfile(config_path, "{}/config.json".format(save_dir))
-    to_save = model.module if hasattr(model,  "module") else model
+    to_save = model.module if hasattr(model, "module") else model
     torch.save(to_save.state_dict(), os.path.join(save_dir, "best_model.th"))
     torch.save({"optimizer": optimizer.state_dict(), "last_epoch": last_epoch}, os.path.join(save_dir, "optim.th"))
     if encoder:
-        to_save = encoder.module if hasattr(encoder,  "module") else encoder
+        to_save = encoder.module if hasattr(encoder, "module") else encoder
         torch.save(to_save.state_dict(), os.path.join(save_dir, "best_encoder.th"))
 
 
@@ -98,8 +99,20 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
         state_obj = torch.load(os.path.join(args.load_from, "optim.th"))
         opt.load_state_dict(state_obj["optimizer"])
         num_epochs = num_epochs - state_obj["last_epoch"]
+        (dev_task, _), _ = dev_taskset.sample(k=config.shots)
+        dev_loader = DataLoader(data_utils.InnerDataset(dev_task), batch_size=task_bs, shuffle=False, num_workers=0)
+        dev_error, dev_metrics = utils.compute_loss_metrics(
+            dev_loader, bert_model, clf_head, label_map, grad_required=False
+        )
+        best_dev_error = dev_error.mean()
+    
+    def save_dist(name):
+        save_dir = "./models/{}".format(utils.get_savedir_name())
+        with open(os.path.join(save_dir, name), "wb") as f:
+            np.save(f, train_taskset.tau.detach().cpu().numpy())
 
     patience_ctr = 0
+    constrain_loss_list = defaultdict(lambda: deque(maxlen=10))
     tqdm_bar = tqdm(range(num_epochs))
     for iteration in tqdm_bar:
         dev_iteration_error = 0.0
@@ -132,7 +145,20 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 dev_error *= imps
                 dev_error = dev_error.sum()
             elif config.train_type == "constrain":
-                dev_error = dev_error.mean() + ((dev_error - config.constrain_val) * imps).sum()
+                constrain_val = config.constrain_val
+                if hasattr(config, "constrain_type") and config.constrain_type == "dynamic":
+                    constrain_val = torch.tensor(
+                        [
+                            np.mean(constrain_loss_list[lang])
+                            if len(constrain_loss_list[lang]) > 5
+                            else -config.constrain_val
+                            for lang in train_langs
+                        ]
+                    ).to(dev_error.device)
+                    for loss_val, lang in zip(dev_error, train_langs):
+                        constrain_loss_list[lang].append(loss_val.item())
+                dev_error = dev_error.mean() + ((dev_error - constrain_val) * imps).sum()
+
             elif config.train_type == "metabase":
                 dev_error = dev_error.mean()
             else:
@@ -162,6 +188,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             logger.info("Found new best model!")
             best_dev_error = dev_iteration_error
             save(meta_model, opt, args.config_path, iteration)
+            save_dist("best_minmax_dist.npy")
             patience_ctr = 0
         else:
             patience_ctr += 1
@@ -170,9 +197,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 break
 
         if config.train_type != "metabase" and iteration % 10 == 0:
-            save_dir = "./models/{}".format(utils.get_savedir_name())
-            with open(os.path.join(save_dir, "minmax_dist.npy"), "wb") as f:
-                np.save(f, train_taskset.tau.detach().cpu().numpy())
+            save_dist("minmax_dist.npy")
 
     logger.info(f"Best validation loss = {best_dev_error}")
     logger.info("Best model saved at: {}".format(utils.get_savedir_name()))
@@ -195,27 +220,33 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
         dataset=dev_set, batch_size=config.batch_size, collate_fn=utils.pos_collate_fn, shuffle=False,
     )
     num_epochs = config.num_epochs
-    no_decay = ["bias", "LayerNorm.weight"]
-    optimizer_grouped_parameters = [
-        {
-            "params": [
-                p
-                for n, p in list(bert_model.named_parameters()) + list(clf_head.named_parameters())
-                if not any(nd in n for nd in no_decay)
-            ],
-            "weight_decay": config.weight_decay,
-        },
-        {
-            "params": [
-                p
-                for n, p in list(bert_model.named_parameters()) + list(clf_head.named_parameters())
-                if any(nd in n for nd in no_decay)
-            ],
-            "weight_decay": 0.0,
-        },
-    ]
-    opt = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.outer_lr)
-    best_dev_f1 = np.inf
+
+    if config.finetune_enc:
+        no_decay = ["bias", "LayerNorm.weight"]
+        optimizer_grouped_parameters = [
+            {
+                "params": [
+                    p
+                    for n, p in list(bert_model.named_parameters()) + list(clf_head.named_parameters())
+                    if not any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": config.weight_decay,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in list(bert_model.named_parameters()) + list(clf_head.named_parameters())
+                    if any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.0,
+            },
+        ]
+        opt = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.outer_lr)
+    else:
+        opt = Adam(clf_head.parameters(), lr=config.outer_lr)
+        bert_model = bert_model.eval()
+
+    best_dev_error = np.inf
     if args.load_from:
         state_obj = torch.load(os.path.join(args.load_from, "optim.th"))
         opt.load_state_dict(state_obj["optimizer"])
@@ -225,21 +256,24 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
         dev_loss, dev_metrics = utils.compute_loss_metrics(
             dev_loader, bert_model, clf_head, label_map, grad_required=False
         )
-        best_dev_f1 = dev_metrics["f1"]
+        best_dev_error = dev_loss.mean()
 
+    patience_ctr = 0
     for epoch in range(num_epochs):
         running_loss = 0.0
         epoch_iterator = tqdm(train_loader, desc="Training")
         for train_step, (input_ids, attention_mask, token_type_ids, labels, _) in enumerate(epoch_iterator):
             # train
-            bert_model = bert_model.train()
+            if config.finetune_enc:
+                bert_model = bert_model.train()
             clf_head = clf_head.train()
             opt.zero_grad()
             bert_output = bert_model(input_ids, attention_mask, token_type_ids)
             output = clf_head(bert_output, labels=labels, attention_mask=attention_mask)
             loss = output.loss.mean()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(bert_model.parameters(), config.max_grad_norm)
+            if config.finetune_enc:
+                torch.nn.utils.clip_grad_norm_(bert_model.parameters(), config.max_grad_norm)
             torch.nn.utils.clip_grad_norm_(clf_head.parameters(), config.max_grad_norm)
             opt.step()
             running_loss += loss.item()
@@ -261,20 +295,20 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
                 tb_writer.add_scalar("metrics/recall", dev_metrics["recall"], epoch)
                 tb_writer.add_scalar("metrics/f1", dev_metrics["f1"], epoch)
 
-                if dev_metrics["f1"] > best_dev_f1:
+                if dev_loss < best_dev_error:
                     logger.info("Found new best model!")
-                    best_dev_f1 = dev_metrics["f1"]
+                    best_dev_error = dev_loss
                     save(clf_head, opt, args.config_path, epoch, bert_model)
                     patience_ctr = 0
                 else:
                     patience_ctr += 1
                     if patience_ctr == config.patience:
                         logger.info("Ran out of patience. Stopping training early...")
-                        break
+                        return
 
         logger.info(f"Finished epoch {epoch+1} with avg. training loss: {running_loss/(train_step + 1)}")
 
-    logger.info(f"Best validation f1 = {best_dev_f1}")
+    logger.info(f"Best validation loss = {best_dev_error}")
     logger.info("Best model saved at: {}".format(utils.get_savedir_name()))
 
 
@@ -302,19 +336,21 @@ def main():
     train_max_examples = config.train_max_examples
     dev_max_examples = config.dev_max_examples
     logger.info("Creating train sets...")
-    train_set = [data_class(p, config.max_seq_length, config.model_type, train_max_examples) for p in tqdm(train_paths)]
+    train_set = [
+        data_class(p, config.max_seq_length, config.model_type, train_max_examples) for p in tqdm(train_paths)
+    ]
     logger.info("Creating dev sets...")
-    dev_set = [data_class(p, config.max_seq_length, config.model_type,  dev_max_examples) for p in tqdm(dev_paths)]
+    dev_set = [data_class(p, config.max_seq_length, config.model_type, dev_max_examples) for p in tqdm(dev_paths)]
 
     bert_model = model_utils.BERT(config)
     clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size())
     if args.load_from:
         logger.info(f"Resuming training with weights from {args.load_from}")
-        utils.set_savedir_name(args.load_from)
+        utils.set_savedir_name(args.load_from.split("/")[-1])
         clf_head.load_state_dict(torch.load(os.path.join(args.load_from, "best_model.th")))
     if args.load_from or hasattr(config, "encoder_ckpt"):
         if args.load_from and hasattr(config, "encoder_ckpt"):
-            raise ValueError('Conflict: both `load_from` and `encoder_ckpt` set.')
+            raise ValueError("Conflict: both `load_from` and `encoder_ckpt` set.")
         load_path = args.load_from if not hasattr(config, "encoder_ckpt") else config.encoder_ckpt
         logger.info(f"Using encoder weights from {load_path}")
         bert_model.load_state_dict(torch.load(os.path.join(load_path, "best_encoder.th")))
