@@ -63,7 +63,7 @@ class SeqClfHead(nn.Module):
         loss = None
         if labels is not None:
             labels = labels.to(DEVICE)
-            loss_fct = CrossEntropyLoss(reduction='none')
+            loss_fct = CrossEntropyLoss(reduction="none")
             batch_size, max_len, _ = logits.shape
             # Only keep active parts of the loss
             if attention_mask is not None:
@@ -75,6 +75,44 @@ class SeqClfHead(nn.Module):
                 loss = loss_fct(active_logits, active_labels)
             else:
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-        
+
         loss = loss.view([batch_size, max_len]).mean(dim=1)
-        return ClassifierOutput(loss=loss, logits=logits,)
+        return ClassifierOutput(loss=loss, logits=logits)
+
+
+class ClfHead(nn.Module):
+    def __init__(self, hidden_dropout_prob, bert_hidden_size):
+        super(ClfHead, self).__init__()
+        self.classifier = nn.Sequential(
+            nn.Dropout(hidden_dropout_prob),
+            nn.Linear(bert_hidden_size, 1024),
+            nn.Dropout(hidden_dropout_prob),
+            nn.ReLU(),
+            nn.Linear(1024, 2),
+        )
+
+    def forward(
+        self, outputs, labels=None, attention_mask=None,
+    ):
+        sequence_output = outputs[0]
+        logits = self.classifier(sequence_output)
+
+        start_logits, end_logits = logits.split(1, dim=-1)
+        start_logits = start_logits.squeeze(-1)
+        end_logits = end_logits.squeeze(-1)
+
+        total_loss = None
+        if labels is not None:
+            start_positions, end_positions = labels.split(1, dim=-1)
+            start_positions = start_positions.squeeze(-1).to(DEVICE)
+            end_positions = end_positions.squeeze(-1).to(DEVICE)
+            ignored_index = start_logits.size(1)
+            start_positions.clamp_(0, ignored_index)
+            end_positions.clamp_(0, ignored_index)
+
+            loss_fct = CrossEntropyLoss(reduction="none", ignore_index=ignored_index)
+            start_loss = loss_fct(start_logits, start_positions)
+            end_loss = loss_fct(end_logits, end_positions)
+            total_loss = (start_loss + end_loss) / 2
+
+        return ClassifierOutput(loss=total_loss, logits=(start_logits, end_logits))
