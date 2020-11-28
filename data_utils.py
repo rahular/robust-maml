@@ -15,6 +15,7 @@ from torch.nn import functional as F
 from torch.distributions.categorical import Categorical
 from torch.utils import data
 from transformers import AutoTokenizer
+from transformers import SquadV1Processor, squad_convert_examples_to_features
 from learn2learn.data import MetaDataset, TaskDataset
 
 logging.basicConfig(
@@ -178,6 +179,51 @@ class POS(data.Dataset):
         return self.__getitem__(random.randint(0, len(self.features) - 1))
 
 
+class QA(data.Dataset):
+    def __init__(self, path, max_clen, max_qlen, doc_stride, model_type):
+        # filename should always be of the form <lang>.<split>
+        data_dir = "/".join(path.split("/")[:-1])
+        self.lang, split = path.split("/")[-1].split(".")
+        cached_features_file = path + ".th"
+        if os.path.exists(cached_features_file):
+            logger.info(f"Loading features from cached file {cached_features_file}")
+            self.features = torch.load(cached_features_file)
+        else:
+            logger.info(f"Saving features into cached file {cached_features_file}")
+            processor = SquadV1Processor()
+            examples = processor.get_train_examples(data_dir, filename="{}.{}".format(self.lang, split))
+            tokenizer = AutoTokenizer.from_pretrained(model_type)
+            self.features, _ = squad_convert_examples_to_features(
+                examples=examples,
+                tokenizer=tokenizer,
+                max_seq_length=max_clen,
+                doc_stride=doc_stride,
+                max_query_length=max_qlen,
+                is_training=True,   #  this allows to always get the answer indices
+                return_dataset="pt",
+            )
+            torch.save(self.features, cached_features_file)
+
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, idx):
+        # start and end positions are combined as `label_ids` so that the flow doesn't break
+        # we'll split it up later inside the model
+        return (
+            {
+                "input_ids": self.features[idx].input_ids,
+                "attention_mask": self.features[idx].attention_mask,
+                "token_type_ids": self.features[idx].token_type_ids,
+                "label_ids": (self.features[idx].start_position, self.features[idx].end_position),
+            },
+            self.lang,
+        )
+
+    def sample(self):
+        return self.__getitem__(random.randint(0, len(self.features) - 1))
+
+
 class NER(data.Dataset):
     def __init__(self, path, max_seq_len, model_type, max_count=10 ** 6):
         # path should always be of the form <lang>.<split>
@@ -200,7 +246,7 @@ class NER(data.Dataset):
                             labels.append(tags[idx : idx + max_seq_len])
                         words, tags = [], []
                         # we don't count and break here, because the first k examples are not necessarily
-                        # the best as they may come only from a handful of wiki docs. 
+                        # the best as they may come only from a handful of wiki docs.
                     else:
                         parts = line.split()
                         words.append(parts[0])
