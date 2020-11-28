@@ -105,7 +105,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             dev_loader, bert_model, clf_head, label_map, grad_required=False
         )
         best_dev_error = dev_error.mean()
-    
+
     def save_dist(name):
         save_dir = "./models/{}".format(utils.get_savedir_name())
         with open(os.path.join(save_dir, name), "wb") as f:
@@ -166,17 +166,27 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             dev_iteration_error += dev_error
 
             tb_writer.add_scalar("metrics/loss", dev_error, (iteration * num_epochs) + episode_num)
-            tb_writer.add_scalar("metrics/precision", dev_metrics["precision"], (iteration * num_epochs) + episode_num)
-            tb_writer.add_scalar("metrics/recall", dev_metrics["recall"], (iteration * num_epochs) + episode_num)
-            tb_writer.add_scalar("metrics/f1", dev_metrics["f1"], (iteration * num_epochs) + episode_num)
+            if dev_metrics is not None:
+                tb_writer.add_scalar(
+                    "metrics/precision", dev_metrics["precision"], (iteration * num_epochs) + episode_num
+                )
+                tb_writer.add_scalar("metrics/recall", dev_metrics["recall"], (iteration * num_epochs) + episode_num)
+                tb_writer.add_scalar("metrics/f1", dev_metrics["f1"], (iteration * num_epochs) + episode_num)
 
         dev_iteration_error /= num_episodes
         train_iteration_error /= num_episodes
-        tqdm_bar.set_description(
-            "Train. Loss: {:.3f} Train F1: {:.3f} Val. Loss: {:.3f} Val. F1: {:.3f}".format(
-                train_iteration_error.item(), train_metrics["f1"], dev_iteration_error.item(), dev_metrics["f1"]
+        if dev_metrics is not None:
+            tqdm_bar.set_description(
+                "Train. Loss: {:.3f} Train F1: {:.3f} Val. Loss: {:.3f} Val. F1: {:.3f}".format(
+                    train_iteration_error.item(), train_metrics["f1"], dev_iteration_error.item(), dev_metrics["f1"]
+                )
             )
-        )
+        else:
+            tqdm_bar.set_description(
+                "Train. Loss: {:.3f} Val. Loss: {:.3f}".format(
+                    train_iteration_error.item(), dev_iteration_error.item()
+                )
+            )
         if config.optim == "adam":
             dev_iteration_error.backward()
             torch.nn.utils.clip_grad_norm_(opt_params, config.max_grad_norm)
@@ -212,13 +222,11 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
         dataset=train_set,
         sampler=utils.BalancedTaskSampler(dataset=train_set, batch_size=config.batch_size),
         batch_size=config.batch_size,
-        collate_fn=utils.pos_collate_fn,
+        collate_fn=utils.collate_fn,
         shuffle=False,
     )
     dev_set = ConcatDataset(dev_set)
-    dev_loader = DataLoader(
-        dataset=dev_set, batch_size=config.batch_size, collate_fn=utils.pos_collate_fn, shuffle=False,
-    )
+    dev_loader = DataLoader(dataset=dev_set, batch_size=config.batch_size, collate_fn=utils.collate_fn, shuffle=False,)
     num_epochs = config.num_epochs
 
     if config.finetune_enc:
@@ -285,15 +293,17 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
                     dev_loader, bert_model, clf_head, label_map, grad_required=False
                 )
                 dev_loss = dev_loss.mean()
-                logger.info(
-                    "Dev. metrics (p/r/f): {:.3f} {:.3f} {:.3f}".format(
-                        dev_metrics["precision"], dev_metrics["recall"], dev_metrics["f1"]
-                    )
-                )
+
                 tb_writer.add_scalar("metrics/loss", dev_loss, epoch)
-                tb_writer.add_scalar("metrics/precision", dev_metrics["precision"], epoch)
-                tb_writer.add_scalar("metrics/recall", dev_metrics["recall"], epoch)
-                tb_writer.add_scalar("metrics/f1", dev_metrics["f1"], epoch)
+                if dev_metrics is not None:
+                    tb_writer.add_scalar("metrics/precision", dev_metrics["precision"], epoch)
+                    tb_writer.add_scalar("metrics/recall", dev_metrics["recall"], epoch)
+                    tb_writer.add_scalar("metrics/f1", dev_metrics["f1"], epoch)
+                    logger.info(
+                        "Dev. metrics (p/r/f): {:.3f} {:.3f} {:.3f}".format(
+                            dev_metrics["precision"], dev_metrics["recall"], dev_metrics["f1"]
+                        )
+                    )
 
                 if dev_loss < best_dev_error:
                     logger.info("Found new best model!")
@@ -330,20 +340,33 @@ def main():
     elif "/ner/" in data_dir:
         data_class = data_utils.NER
         label_map = {idx: l for idx, l in enumerate(data_utils.get_ner_labels())}
+    elif "/tydiqa/" in data_dir:
+        data_class = data_utils.QA
+        label_map = None
     else:
         raise ValueError(f"Unknown task or incorrect `config.data_dir`: {config.data_dir}")
-
-    train_max_examples = config.train_max_examples
-    dev_max_examples = config.dev_max_examples
-    logger.info("Creating train sets...")
-    train_set = [
-        data_class(p, config.max_seq_length, config.model_type, train_max_examples) for p in tqdm(train_paths)
-    ]
-    logger.info("Creating dev sets...")
-    dev_set = [data_class(p, config.max_seq_length, config.model_type, dev_max_examples) for p in tqdm(dev_paths)]
-
+    
+    # NOTE: if `label_map` is None, the task is not sequence labeing
     bert_model = model_utils.BERT(config)
-    clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size())
+    if label_map is not None:
+        train_max_examples = config.train_max_examples
+        dev_max_examples = config.dev_max_examples
+        logger.info("Creating train sets...")
+        train_set = [
+            data_class(p, config.max_seq_length, config.model_type, train_max_examples) for p in tqdm(train_paths)
+        ]
+        logger.info("Creating dev sets...")
+        dev_set = [data_class(p, config.max_seq_length, config.model_type, dev_max_examples) for p in tqdm(dev_paths)]
+        clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size()) 
+    else:
+        logger.info("Creating train sets...")
+        train_set = [
+            data_class(p, config.max_clen, config.max_qlen, config.doc_stride, config.model_type) for p in tqdm(train_paths[:2])
+        ]
+        logger.info("Creating dev sets...")
+        dev_set = [data_class(p, config.max_clen, config.max_qlen, config.doc_stride, config.model_type) for p in tqdm(dev_paths[:2])]
+        clf_head = model_utils.ClfHead(config.hidden_dropout_prob, bert_model.get_hidden_size())
+    
     if args.load_from:
         logger.info(f"Resuming training with weights from {args.load_from}")
         utils.set_savedir_name(args.load_from.split("/")[-1])

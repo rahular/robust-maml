@@ -79,15 +79,16 @@ def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=T
         else:
             loss = torch.cat([loss, output.loss], 0)
 
-        for lgt, lbl in zip(output.logits, labels):
-            if preds is None:
-                preds = torch.unsqueeze(lgt.detach().cpu(), 0)
-            else:
-                preds = torch.cat((preds, torch.unsqueeze(lgt.detach().cpu(), 0)), dim=0)
-            if gold is None:
-                gold = torch.unsqueeze(lbl.detach().cpu(), 0)
-            else:
-                gold = torch.cat((gold, torch.unsqueeze(lbl.detach().cpu(), 0)), dim=0)
+        if label_map is not None:   # HACK: easiest way to identify if the task not sequence labeling
+            for lgt, lbl in zip(output.logits, labels):
+                if preds is None:
+                    preds = torch.unsqueeze(lgt.detach().cpu(), 0)
+                else:
+                    preds = torch.cat((preds, torch.unsqueeze(lgt.detach().cpu(), 0)), dim=0)
+                if gold is None:
+                    gold = torch.unsqueeze(lbl.detach().cpu(), 0)
+                else:
+                    gold = torch.cat((gold, torch.unsqueeze(lbl.detach().cpu(), 0)), dim=0)
 
     metrics = None
     if preds is not None and gold is not None:
@@ -96,7 +97,7 @@ def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=T
     return loss, metrics
 
 
-def pos_collate_fn(batch):
+def collate_fn(batch):
     input_ids, attention_mask, token_type_ids, label_ids, languages = [], [], [], [], []
     for f, l in batch:
         input_ids.append(f['input_ids'])
