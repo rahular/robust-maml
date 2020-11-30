@@ -1,5 +1,10 @@
+"""
+The code in this file is heavily borrowed from https://github.com/huggingface/transformers
+"""
 import os
+import json
 import torch
+import transformers
 import pyconll
 import logging
 import random
@@ -8,14 +13,16 @@ import pandas as pd
 import learn2learn as l2l
 
 from tqdm import tqdm
+from functools import partial
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import List, Optional
+from multiprocessing import Pool, cpu_count
 from torch.nn import functional as F
 from torch.distributions.categorical import Categorical
 from torch.utils import data
 from transformers import AutoTokenizer
-from transformers import SquadV1Processor, squad_convert_examples_to_features
+from transformers.data.processors.squad import squad_convert_example_to_features, SquadExample
 from learn2learn.data import MetaDataset, TaskDataset
 
 logging.basicConfig(
@@ -27,6 +34,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 @dataclass
 class InputFeatures:
+    unique_id: int
     input_ids: List[int]
     attention_mask: List[int]
     token_type_ids: Optional[List[int]] = None
@@ -39,6 +47,7 @@ class InnerDataset(data.Dataset):
         self.attention_mask = data["attention_mask"]
         self.token_type_ids = data["token_type_ids"]
         self.label_ids = data["label_ids"]
+        self.unique_ids = data["unique_ids"]
 
     def __len__(self):
         return len(self.label_ids)
@@ -49,6 +58,7 @@ class InnerDataset(data.Dataset):
             self.attention_mask[idx],
             self.token_type_ids[idx],
             self.label_ids[idx],
+            self.unique_ids[idx]
         )
 
 
@@ -74,6 +84,7 @@ class CustomLangTaskDataset(nn.Module):
         X["attention_mask"].append(torch.tensor(x["attention_mask"], dtype=torch.long))
         X["token_type_ids"].append(torch.tensor(x["token_type_ids"], dtype=torch.long))
         X["label_ids"].append(torch.tensor(x["label_ids"], dtype=torch.long))
+        X["unique_ids"].append(x["unique_id"])
         return X
 
     def _stack_tensors(self, X):
@@ -81,6 +92,7 @@ class CustomLangTaskDataset(nn.Module):
         X["attention_mask"] = torch.stack(X["attention_mask"], 0)
         X["token_type_ids"] = torch.stack(X["token_type_ids"], 0)
         X["label_ids"] = torch.stack(X["label_ids"], 0)
+        X["unique_ids"] = torch.tensor(X["unique_ids"], dtype=torch.int)
         return X
 
     def sample(self, k=50, langs=None):
@@ -98,7 +110,7 @@ class CustomLangTaskDataset(nn.Module):
                 lang_idx.append(self.lang2id[lang])
             lang_idx = torch.tensor(lang_idx)
 
-        X = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "label_ids": []}
+        X = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "label_ids": [], "unique_ids": []}
         Y = []
         for lang in langs:
             x, y = self.datasets[lang].sample()
@@ -112,8 +124,8 @@ class CustomLangTaskDataset(nn.Module):
         # this is used only during testing, so there should only be one language
         assert len(self.datasets) == 1
         dataset = list(self.datasets.values())[0]
-        support_X = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "label_ids": []}
-        query_X = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "label_ids": []}
+        support_X = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "label_ids": [], "unique_ids": []}
+        query_X = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "label_ids": [], "unique_ids": []}
         ids = list(range(len(dataset)))
         random.shuffle(ids)
         support_ids, query_ids = ids[:k], ids[k:]
@@ -131,6 +143,7 @@ class CustomLangTaskDataset(nn.Module):
         return support_X, query_X
 
 
+##################### sequence labeling data utils #####################
 class POS(data.Dataset):
     def __init__(self, path, max_seq_len, model_type, max_count=10 ** 6):
         sents, labels = [], []
@@ -171,51 +184,7 @@ class POS(data.Dataset):
                 "attention_mask": self.features[idx].attention_mask,
                 "token_type_ids": self.features[idx].token_type_ids,
                 "label_ids": self.features[idx].label_ids,
-            },
-            self.lang,
-        )
-
-    def sample(self):
-        return self.__getitem__(random.randint(0, len(self.features) - 1))
-
-
-class QA(data.Dataset):
-    def __init__(self, path, max_clen, max_qlen, doc_stride, model_type):
-        # filename should always be of the form <lang>.<split>
-        data_dir = "/".join(path.split("/")[:-1])
-        self.lang, split = path.split("/")[-1].split(".")
-        cached_features_file = path + ".th"
-        if os.path.exists(cached_features_file):
-            logger.info(f"Loading features from cached file {cached_features_file}")
-            self.features = torch.load(cached_features_file)
-        else:
-            logger.info(f"Saving features into cached file {cached_features_file}")
-            processor = SquadV1Processor()
-            examples = processor.get_train_examples(data_dir, filename="{}.{}".format(self.lang, split))
-            tokenizer = AutoTokenizer.from_pretrained(model_type)
-            self.features, _ = squad_convert_examples_to_features(
-                examples=examples,
-                tokenizer=tokenizer,
-                max_seq_length=max_clen,
-                doc_stride=doc_stride,
-                max_query_length=max_qlen,
-                is_training=True,   #  this allows to always get the answer indices
-                return_dataset="pt",
-            )
-            torch.save(self.features, cached_features_file)
-
-    def __len__(self):
-        return len(self.features)
-
-    def __getitem__(self, idx):
-        # start and end positions are combined as `label_ids` so that the flow doesn't break
-        # we'll split it up later inside the model
-        return (
-            {
-                "input_ids": self.features[idx].input_ids,
-                "attention_mask": self.features[idx].attention_mask,
-                "token_type_ids": self.features[idx].token_type_ids,
-                "label_ids": (self.features[idx].start_position, self.features[idx].end_position),
+                "unique_id": self.features[idx].unique_id,
             },
             self.lang,
         )
@@ -275,6 +244,7 @@ class NER(data.Dataset):
                 "attention_mask": self.features[idx].attention_mask,
                 "token_type_ids": self.features[idx].token_type_ids,
                 "label_ids": self.features[idx].label_ids,
+                "unique_id": self.features[idx].unique_id,
             },
             self.lang,
         )
@@ -308,7 +278,7 @@ def convert_examples_to_features(
         `cls_token_segment_id` define the segment id associated to the CLS token (0 for BERT, 2 for XLNet)
     """
     features = []
-    for _, (sent, lbl) in enumerate(zip(sents, labels)):
+    for idx, (sent, lbl) in enumerate(zip(sents, labels)):
         tokens = []
         label_ids = []
         for word, label in zip(sent, lbl):
@@ -365,7 +335,7 @@ def convert_examples_to_features(
 
         features.append(
             InputFeatures(
-                input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids, label_ids=label_ids
+                unique_id=idx, input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids, label_ids=label_ids
             )
         )
 
@@ -396,4 +366,166 @@ def get_pos_labels():
 
 def get_ner_labels():
     return ["B-LOC", "B-ORG", "B-PER", "I-LOC", "I-ORG", "I-PER", "O"]
+
+
+##################### QA data utils #####################
+class QA(data.Dataset):
+    def __init__(self, path, max_clen, max_qlen, doc_stride, model_type):
+        # filename should always be of the form <lang>.<split>
+        self.lang = path.split("/")[-1].split(".")[0]
+        cached_features_file = path + f"_{max_clen}_{doc_stride}_{max_qlen}.th"
+        if os.path.exists(cached_features_file):
+            logger.info(f"Loading features from cached file {cached_features_file}")
+            features_and_dataset = torch.load(cached_features_file)
+            self.features, self.dataset, self.examples = (
+                features_and_dataset["features"],
+                features_and_dataset["dataset"],
+                features_and_dataset["examples"],
+            )
+        else:
+            logger.info(f"Saving features into cached file {cached_features_file}")
+            self.examples = create_squad_examples(path)
+            tokenizer = AutoTokenizer.from_pretrained(model_type)
+            self.features, self.dataset = squad_convert_examples_to_features(
+                examples=self.examples,
+                tokenizer=tokenizer,
+                max_seq_length=max_clen,
+                doc_stride=doc_stride,
+                max_query_length=max_qlen,
+            )
+            torch.save(
+                {"features": self.features, "dataset": self.dataset, "examples": self.examples}, cached_features_file
+            )
+
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, idx):
+        # start and end positions are combined as `label_ids` so that the flow doesn't break
+        # we'll split it up later inside the model
+        return (
+            {
+                "input_ids": self.features[idx].input_ids,
+                "attention_mask": self.features[idx].attention_mask,
+                "token_type_ids": self.features[idx].token_type_ids,
+                "label_ids": (self.features[idx].start_position, self.features[idx].end_position),
+                "unique_id": self.features[idx].unique_id
+            },
+            self.lang,
+        )
+
+    def sample(self):
+        return self.__getitem__(random.randint(0, len(self.features) - 1))
+
+
+def squad_convert_example_to_features_init(tokenizer_for_convert):
+    transformers.data.processors.squad.tokenizer = tokenizer_for_convert
+
+
+def squad_convert_examples_to_features(
+    examples,
+    tokenizer,
+    max_seq_length,
+    doc_stride,
+    max_query_length,
+    padding_strategy="max_length",
+    return_dataset=False,
+    threads=1,
+    tqdm_enabled=True,
+):
+    features = []
+
+    threads = min(threads, cpu_count())
+    with Pool(threads, initializer=squad_convert_example_to_features_init, initargs=(tokenizer,)) as p:
+        annotate_ = partial(
+            squad_convert_example_to_features,
+            max_seq_length=max_seq_length,
+            doc_stride=doc_stride,
+            max_query_length=max_query_length,
+            padding_strategy=padding_strategy,
+            is_training=True,
+        )
+        features = list(
+            tqdm(
+                p.imap(annotate_, examples, chunksize=32),
+                total=len(examples),
+                desc="convert squad examples to features",
+                disable=not tqdm_enabled,
+            )
+        )
+
+    new_features = []
+    unique_id = 1000000000
+    example_index = 0
+    for example_features in tqdm(
+        features, total=len(features), desc="add example index and unique id", disable=not tqdm_enabled
+    ):
+        if not example_features:
+            continue
+        for example_feature in example_features:
+            example_feature.example_index = example_index
+            example_feature.unique_id = unique_id
+            new_features.append(example_feature)
+            unique_id += 1
+        example_index += 1
+    features = new_features
+    del new_features
+
+    all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
+    all_attention_masks = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
+    all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
+    all_cls_index = torch.tensor([f.cls_index for f in features], dtype=torch.long)
+    all_p_mask = torch.tensor([f.p_mask for f in features], dtype=torch.float)
+    all_is_impossible = torch.tensor([f.is_impossible for f in features], dtype=torch.float)
+    all_feature_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
+    all_start_positions = torch.tensor([f.start_position for f in features], dtype=torch.long)
+    all_end_positions = torch.tensor([f.end_position for f in features], dtype=torch.long)
+    dataset = data.TensorDataset(
+        all_input_ids,
+        all_attention_masks,
+        all_token_type_ids,
+        all_feature_index,
+        all_start_positions,
+        all_end_positions,
+        all_cls_index,
+        all_p_mask,
+        all_is_impossible,
+    )
+    return features, dataset
+
+
+def create_squad_examples(data_path):
+    with open(data_path, "r", encoding="utf-8") as f:
+        input_data = json.load(f)["data"]
+    examples = []
+    for entry in tqdm(input_data):
+        title = entry["title"]
+        for paragraph in entry["paragraphs"]:
+            context_text = paragraph["context"]
+            for qa in paragraph["qas"]:
+                qas_id = qa["id"]
+                question_text = qa["question"]
+                start_position_character = None
+                answer_text = None
+                answers = []
+
+                is_impossible = qa.get("is_impossible", False)
+                if not is_impossible:
+                    answer = qa["answers"][0]
+                    answer_text = answer["text"]
+                    start_position_character = answer["answer_start"]
+                    answers = qa["answers"]
+
+                example = SquadExample(
+                    qas_id=qas_id,
+                    question_text=question_text,
+                    context_text=context_text,
+                    answer_text=answer_text,
+                    start_position_character=start_position_character,
+                    title=title,
+                    is_impossible=is_impossible,
+                    answers=answers,
+                )
+                examples.append(example)
+    return examples
 

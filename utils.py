@@ -1,3 +1,4 @@
+import os
 import math
 import torch
 import string
@@ -13,6 +14,13 @@ from collections import OrderedDict
 from torch.utils import data
 from seqeval.metrics import f1_score, precision_score, recall_score
 
+from transformers import AutoTokenizer
+from transformers.data.processors.squad import SquadResult
+from transformers.data.metrics.squad_metrics import (
+    compute_predictions_logits,
+    squad_evaluate,
+)
+
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
 )
@@ -20,12 +28,13 @@ logger = logging.getLogger(__name__)
 
 savedir = None
 
+
 def get_savedir_name():
     global savedir
     if not savedir:
         savedir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         # just to be extra careful
-        savedir += ("-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4)))
+        savedir += "-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
         logging.info(f"All models will be saved at: {savedir}")
     return savedir
 
@@ -40,7 +49,7 @@ def clean_keys(state_dict):
     for k, v in state_dict.items():
         if k.startswith("module."):
             k = k[7:]
-        new_state_dict[k] =  v
+        new_state_dict[k] = v
     return new_state_dict
 
 
@@ -79,7 +88,7 @@ def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=T
         else:
             loss = torch.cat([loss, output.loss], 0)
 
-        if label_map is not None:   # HACK: easiest way to identify if the task not sequence labeling
+        if label_map is not None:  # HACK: easiest way to identify if the task not sequence labeling
             for lgt, lbl in zip(output.logits, labels):
                 if preds is None:
                     preds = torch.unsqueeze(lgt.detach().cpu(), 0)
@@ -97,16 +106,65 @@ def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=T
     return loss, metrics
 
 
+def qa_evaluate(lang, examples, features, model_type, loader, bert_model, learner, save_dir):
+    all_results = []
+    loss = []
+    for batch in loader:
+        with torch.no_grad():
+            input_ids, attention_mask, token_type_ids, labels, unique_ids = batch[0], batch[1], batch[2], batch[3], batch[4]
+            bert_output = bert_model(input_ids, attention_mask, token_type_ids)
+            outputs = learner(bert_output, labels=labels, attention_mask=attention_mask)
+            loss.append(outputs.loss.mean().item())
+
+        for i, uid in enumerate(unique_ids):
+            unique_id = int(uid.item())
+            start_logits = outputs.start_logits[i].detach().cpu().tolist()
+            end_logits = outputs.end_logits[i].detach().cpu().tolist()
+            result = SquadResult(unique_id, start_logits, end_logits)
+            all_results.append(result)
+
+        save_dir = os.path.join(save_dir, "result")
+        os.makedirs(save_dir, exist_ok=True)
+        output_prediction_file = os.path.join(save_dir, ".predictions")
+        output_nbest_file = os.path.join(save_dir, ".nbest_predictions")
+        features = [f for f in features if f.unique_id in unique_ids]
+        examples = list(set([examples[f.example_index] for f in features]))
+        predictions = compute_predictions_logits(
+            examples,
+            features,
+            all_results,
+            n_best_size=1,
+            max_answer_length=10,
+            do_lower_case=True,
+            output_prediction_file=output_prediction_file,
+            output_nbest_file=output_nbest_file,
+            output_null_log_odds_file=None,
+            verbose_logging=True,
+            version_2_with_negative=False,
+            null_score_diff_threshold=0.0,
+            tokenizer=AutoTokenizer.from_pretrained(model_type),
+        )
+        results = squad_evaluate(examples, predictions)
+        return torch.tensor(loss), dict(results)
+
+
 def collate_fn(batch):
-    input_ids, attention_mask, token_type_ids, label_ids, languages = [], [], [], [], []
+    input_ids, attention_mask, token_type_ids, label_ids, unique_ids, languages = [], [], [], [], [], []
     for f, l in batch:
-        input_ids.append(f['input_ids'])
-        attention_mask.append(f['attention_mask'])
-        token_type_ids.append(f['token_type_ids'])
-        label_ids.append(f['label_ids'])
+        input_ids.append(f["input_ids"])
+        attention_mask.append(f["attention_mask"])
+        token_type_ids.append(f["token_type_ids"])
+        label_ids.append(f["label_ids"])
+        unique_ids.append(f["unique_id"])
         languages.append(l)
-    return torch.tensor(input_ids), torch.tensor(attention_mask), torch.tensor(token_type_ids), \
-            torch.tensor(label_ids), languages
+    return (
+        torch.tensor(input_ids),
+        torch.tensor(attention_mask),
+        torch.tensor(token_type_ids),
+        torch.tensor(label_ids),
+        torch.tensor(unique_ids),
+        languages,
+    )
 
 
 class BalancedTaskSampler(data.sampler.Sampler):
@@ -114,6 +172,7 @@ class BalancedTaskSampler(data.sampler.Sampler):
     Code taken from: https://towardsdatascience.com/unbalanced-data-loading-for-multi-task-learning-in-pytorch-e030ad5033b
     iterate over tasks and provide a random batch per task in each mini-batch
     """
+
     def __init__(self, dataset, batch_size):
         self.dataset = dataset
         self.batch_size = batch_size

@@ -361,10 +361,10 @@ def main():
     else:
         logger.info("Creating train sets...")
         train_set = [
-            data_class(p, config.max_clen, config.max_qlen, config.doc_stride, config.model_type) for p in tqdm(train_paths)
+            data_class(p, config.max_clen, config.max_qlen, config.doc_stride, config.model_type) for p in tqdm(train_paths[:2])
         ]
         logger.info("Creating dev sets...")
-        dev_set = [data_class(p, config.max_clen, config.max_qlen, config.doc_stride, config.model_type) for p in tqdm(dev_paths)]
+        dev_set = [data_class(p, config.max_clen, config.max_qlen, config.doc_stride, config.model_type) for p in tqdm(dev_paths[:2])]
         clf_head = model_utils.ClfHead(config.hidden_dropout_prob, bert_model.get_hidden_size())
     
     if args.load_from:

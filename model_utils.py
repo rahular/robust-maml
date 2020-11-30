@@ -20,9 +20,18 @@ class Config:
 
 
 @dataclass
-class ClassifierOutput:
+class SeqClassifierOutput:
     loss: Optional[torch.FloatTensor] = None
     logits: torch.FloatTensor = None
+
+
+@dataclass
+class QuestionAnsweringModelOutput:
+    loss: Optional[torch.FloatTensor] = None
+    start_logits: torch.FloatTensor = None
+    end_logits: torch.FloatTensor = None
+    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
+    attentions: Optional[Tuple[torch.FloatTensor]] = None
 
 
 class BERT(nn.Module):
@@ -77,7 +86,7 @@ class SeqClfHead(nn.Module):
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
         loss = loss.view([batch_size, max_len]).mean(dim=1)
-        return ClassifierOutput(loss=loss, logits=logits)
+        return SeqClassifierOutput(loss=loss, logits=logits)
 
 
 class ClfHead(nn.Module):
@@ -115,4 +124,10 @@ class ClfHead(nn.Module):
             end_loss = loss_fct(end_logits, end_positions)
             total_loss = (start_loss + end_loss) / 2
 
-        return ClassifierOutput(loss=total_loss, logits=(start_logits, end_logits))
+        return QuestionAnsweringModelOutput(
+            loss=total_loss,
+            start_logits=start_logits,
+            end_logits=end_logits,
+            hidden_states=None,
+            attentions=None,
+        )

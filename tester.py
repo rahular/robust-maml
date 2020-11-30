@@ -11,6 +11,7 @@ import model_utils
 import statistics as stat
 import learn2learn as l2l
 
+from collections import defaultdict
 from torch import optim
 from tqdm import tqdm
 from torch.utils.data import DataLoader
@@ -22,14 +23,26 @@ logger = logging.getLogger(__name__)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config):
-    loader = DataLoader(test_set, batch_size=config.batch_size, collate_fn=utils.pos_collate_fn)
-    loss, metrics = utils.compute_loss_metrics(loader, bert_model, clf_head, label_map)
+def zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config, args):
+    loader = DataLoader(test_set, batch_size=config.batch_size, collate_fn=utils.collate_fn)
+    if label_map is not None:
+        loss, metrics = utils.compute_loss_metrics(loader, bert_model, clf_head, label_map)
+    else:
+        loss, metrics = utils.qa_evaluate(
+            args.test_lang,
+            test_set.examples,
+            test_set.features,
+            config.model_type,
+            loader,
+            bert_model,
+            clf_head,
+            args.model_path,
+        )
     metrics.update({"loss": loss.mean().item()})
     return metrics
 
 
-def evaluate(test_set, label_map, bert_model, clf_head, config, shots):
+def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
     task = data_utils.CustomLangTaskDataset([test_set])
     num_episodes = config.num_episodes
     task_bs = config.task_batch_size
@@ -40,13 +53,7 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, shots):
 
     task_support_error = 0.0
     tqdm_bar = tqdm(range(num_episodes))
-    all_metrics = {"p": [], "r": [], "f": []}
-
-    # if inner_loop_steps > shots:
-    #     logger.warning(
-    #         f"Inner loop steps({inner_loop_steps}) is larger than k({shots}). Setting inner_loop_steps to {shots}."
-    #     )
-    #     inner_loop_steps = shots
+    all_metrics = defaultdict(list)
 
     for _ in tqdm_bar:
         learner = meta_model.clone()
@@ -56,26 +63,49 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, shots):
                 data_utils.InnerDataset(support_task), batch_size=task_bs, shuffle=True, num_workers=0
             )
             support_error, _ = utils.compute_loss_metrics(support_loader, bert_model, learner, label_map)
-            grads = torch.autograd.grad(support_error.mean(), learner.parameters(), create_graph=True, allow_unused=True)
+            grads = torch.autograd.grad(
+                support_error.mean(), learner.parameters(), create_graph=True, allow_unused=True
+            )
             l2l.algorithms.maml_update(learner, inner_lr, grads)
             task_support_error += support_error
 
         query_loader = DataLoader(
             data_utils.InnerDataset(query_task), batch_size=task_bs, shuffle=False, num_workers=0
         )
-        query_error, metrics = utils.compute_loss_metrics(query_loader, bert_model, learner, label_map, grad_required=False)
+        if label_map is not None:
+            query_error, metrics = utils.compute_loss_metrics(
+                query_loader, bert_model, learner, label_map, grad_required=False
+            )
+            all_metrics["p"].append(metrics["precision"])
+            all_metrics["r"].append(metrics["recall"])
+            all_metrics["f"].append(metrics["f1"])
+        else:
+            query_error, metrics = utils.qa_evaluate(
+                args.test_lang,
+                test_set.examples,
+                test_set.features,
+                config.model_type,
+                query_loader,
+                bert_model,
+                learner,
+                args.model_path,
+            )
+            all_metrics["exact"].append(metrics["exact"])
+            all_metrics["f1"].append(metrics["f1"])
         tqdm_bar.set_description("Query Loss: {:.3f}".format(query_error.mean().item()))
 
-        all_metrics["p"].append(metrics["precision"])
-        all_metrics["r"].append(metrics["recall"])
-        all_metrics["f"].append(metrics["f1"])
-
-    all_metrics["p_stdev"] = stat.stdev(all_metrics["p"])
-    all_metrics["p"] = stat.mean(all_metrics["p"])
-    all_metrics["r_stdev"] = stat.stdev(all_metrics["r"])
-    all_metrics["r"] = stat.mean(all_metrics["r"])
-    all_metrics["f_stdev"] = stat.stdev(all_metrics["f"])
-    all_metrics["f"] = stat.mean(all_metrics["f"])
+    if label_map is not None:
+        all_metrics["p_stdev"] = stat.stdev(all_metrics["p"])
+        all_metrics["p"] = stat.mean(all_metrics["p"])
+        all_metrics["r_stdev"] = stat.stdev(all_metrics["r"])
+        all_metrics["r"] = stat.mean(all_metrics["r"])
+        all_metrics["f_stdev"] = stat.stdev(all_metrics["f"])
+        all_metrics["f"] = stat.mean(all_metrics["f"])
+    else:
+        all_metrics["exact_stdev"] = stat.stdev(all_metrics["exact"])
+        all_metrics["exact"] = stat.mean(all_metrics["exact"])
+        all_metrics["f1_stdev"] = stat.stdev(all_metrics["f1"])
+        all_metrics["f1"] = stat.mean(all_metrics["f1"])
     return all_metrics
 
 
@@ -111,15 +141,22 @@ def main():
     elif "/ner/" in data_dir:
         data_class = data_utils.NER
         label_map = {idx: l for idx, l in enumerate(data_utils.get_ner_labels())}
+    elif "/tydiqa" in data_dir:
+        data_class = data_utils.QA
+        label_map = None
     else:
         raise ValueError(f"Unknown task or incorrect `config.data_dir`: {config.data_dir}")
-    test_set = data_class(test_path, config.max_seq_length, config.model_type)
 
     bert_model = model_utils.BERT(config)
+    if label_map is not None:
+        test_set = data_class(test_path, config.max_seq_length, config.model_type)
+        clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size())
+    else:
+        test_set = data_class(test_path, config.max_clen, config.max_qlen, config.doc_stride, config.model_type)
+        clf_head = model_utils.ClfHead(config.hidden_dropout_prob, bert_model.get_hidden_size())
     if os.path.isfile(load_encoder_path):
         bert_model.load_state_dict(utils.clean_keys(torch.load(load_encoder_path)))
     bert_model = bert_model.eval().to(DEVICE)
-    clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size())
     clf_head.load_state_dict(utils.clean_keys(torch.load(load_head_path)))
     clf_head = clf_head.eval().to(DEVICE)
 
@@ -128,9 +165,9 @@ def main():
     summary_metrics = {}
     for shot in shots:
         if shot == 0:
-            summary_metrics["0"] = zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config)
+            summary_metrics["0"] = zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config, args)
         else:
-            summary_metrics[str(shot)] = evaluate(test_set, label_map, bert_model, clf_head, config, shot)
+            summary_metrics[str(shot)] = evaluate(test_set, label_map, bert_model, clf_head, config, args, shot)
 
     save_dir = os.path.join(args.model_path, "result")
     os.makedirs(save_dir, exist_ok=True)
