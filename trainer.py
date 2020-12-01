@@ -270,7 +270,7 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
     for epoch in range(num_epochs):
         running_loss = 0.0
         epoch_iterator = tqdm(train_loader, desc="Training")
-        for train_step, (input_ids, attention_mask, token_type_ids, labels, _) in enumerate(epoch_iterator):
+        for train_step, (input_ids, attention_mask, token_type_ids, labels, _, _) in enumerate(epoch_iterator):
             # train
             if config.finetune_enc:
                 bert_model = bert_model.train()
