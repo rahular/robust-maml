@@ -128,14 +128,14 @@ def qa_evaluate(lang, examples, features, model_type, loader, bert_model, learne
         output_prediction_file = os.path.join(save_dir, ".predictions")
         output_nbest_file = os.path.join(save_dir, ".nbest_predictions")
         features = [f for f in features if f.unique_id in unique_ids]
-        examples = list(set([examples[f.example_index] for f in features]))
+        examples = [examples[f.example_index] for f in features]
         predictions = compute_predictions_logits(
             examples,
             features,
             all_results,
-            n_best_size=1,
-            max_answer_length=10,
-            do_lower_case=True,
+            n_best_size=20,
+            max_answer_length=30,
+            do_lower_case=False,
             output_prediction_file=output_prediction_file,
             output_nbest_file=output_nbest_file,
             output_null_log_odds_file=None,
