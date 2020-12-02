@@ -125,8 +125,8 @@ def qa_evaluate(lang, examples, features, model_type, loader, bert_model, learne
 
         save_dir = os.path.join(save_dir, "result")
         os.makedirs(save_dir, exist_ok=True)
-        output_prediction_file = os.path.join(save_dir, ".predictions")
-        output_nbest_file = os.path.join(save_dir, ".nbest_predictions")
+        output_prediction_file = os.path.join(save_dir, f"{lang}.predictions")
+        output_nbest_file = os.path.join(save_dir, f"{lang}.nbest_predictions")
         features = [f for f in features if f.unique_id in unique_ids]
         examples = [examples[f.example_index] for f in features]
         predictions = compute_predictions_logits(
