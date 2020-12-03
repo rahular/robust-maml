@@ -65,7 +65,6 @@ def save(model, optimizer, config_path, last_epoch, encoder=None):
 def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head):
     save_dir = "./models/{}".format(utils.get_savedir_name())
     tb_writer = SummaryWriter(os.path.join(save_dir, "logs"))
-    bert_model = bert_model.eval()
 
     train_taskset = data_utils.CustomLangTaskDataset(train_set, train_type=config.train_type)
     dev_taskset = data_utils.CustomLangTaskDataset(dev_set)
@@ -75,18 +74,28 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
     task_bs = config.task_batch_size
     inner_loop_steps = config.inner_loop_steps
 
+    bert_model = bert_model.eval()
     if config.optim == "adam":
-        opt_params = meta_model.parameters()
+        opt_params = list(meta_model.parameters())
+        if config.finetune_enc:
+            # NOTE: this condition is never tested as we don't have infinite GPU memory
+            bert_model = bert_model.train()
+            opt_params += list(bert_model.parameters())
         if config.train_type != "metabase":
-            opt_params = list(opt_params) + list(train_taskset.parameters())
+            opt_params += list(train_taskset.parameters())
         opt = Adam(opt_params, lr=config.outer_lr)
     elif config.optim == "alcgd":
         if config.train_type == "metabase":
             raise ValueError(f"ALCGD optimizer can only be used for `minmax` or `constrain` train types.")
+        opt_params = list(meta_model.parameters())
+        if config.finetune_enc:
+            # NOTE: this condition is never tested as we don't have infinite GPU memory
+            bert_model = bert_model.train()
+            opt_params += list(bert_model.parameters())
         torch.backends.cudnn.benchmark = True
         opt = ALCGD(
             max_params=train_taskset.parameters(),
-            min_params=meta_model.parameters(),
+            min_params=opt_params,
             lr_max=config.outer_lr,
             lr_min=config.outer_lr,
             device=DEVICE,
@@ -102,7 +111,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
         (dev_task, _), _ = dev_taskset.sample(k=config.shots)
         dev_loader = DataLoader(data_utils.InnerDataset(dev_task), batch_size=task_bs, shuffle=False, num_workers=0)
         dev_error, dev_metrics = utils.compute_loss_metrics(
-            dev_loader, bert_model, clf_head, label_map, grad_required=False
+            dev_loader, bert_model, clf_head, label_map, grad_required=False, return_metrics=False
         )
         best_dev_error = dev_error.mean()
 
@@ -128,7 +137,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                     data_utils.InnerDataset(train_task), batch_size=task_bs, shuffle=False, num_workers=0
                 )
                 train_error, train_metrics = utils.compute_loss_metrics(
-                    train_loader, bert_model, learner, label_map=label_map
+                    train_loader, bert_model, learner, label_map=label_map, grad_required=True, return_metrics=False
                 )
                 train_error = train_error.mean()
                 train_iteration_error += train_error
@@ -140,7 +149,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             dev_loader = DataLoader(
                 data_utils.InnerDataset(dev_task), batch_size=task_bs, shuffle=False, num_workers=0
             )
-            dev_error, dev_metrics = utils.compute_loss_metrics(dev_loader, bert_model, learner, label_map)
+            dev_error, dev_metrics = utils.compute_loss_metrics(dev_loader, bert_model, learner, label_map, grad_required=True, return_metrics=False)
             if config.train_type == "minmax":
                 dev_error *= imps
                 dev_error = dev_error.sum()
@@ -224,9 +233,12 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
         batch_size=config.batch_size,
         collate_fn=utils.collate_fn,
         shuffle=False,
+        num_workers=0,
     )
     dev_set = ConcatDataset(dev_set)
-    dev_loader = DataLoader(dataset=dev_set, batch_size=config.batch_size, collate_fn=utils.collate_fn, shuffle=False,)
+    dev_loader = DataLoader(
+        dataset=dev_set, batch_size=config.batch_size, collate_fn=utils.collate_fn, shuffle=False, num_workers=0
+    )
     num_epochs = config.num_epochs
 
     if config.finetune_enc:
@@ -251,7 +263,7 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
         ]
         opt = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.outer_lr)
     else:
-        opt = Adam(clf_head.parameters(), lr=config.outer_lr)
+        opt = AdamW(list(clf_head.parameters()), eps=1e-8, lr=config.outer_lr)
         bert_model = bert_model.eval()
 
     best_dev_error = np.inf
@@ -262,7 +274,7 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
         bert_model = bert_model.eval()
         clf_head = clf_head.eval()
         dev_loss, dev_metrics = utils.compute_loss_metrics(
-            dev_loader, bert_model, clf_head, label_map, grad_required=False
+            dev_loader, bert_model, clf_head, label_map, grad_required=False, return_metrics=False
         )
         best_dev_error = dev_loss.mean()
 
@@ -290,7 +302,7 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
                 bert_model = bert_model.eval()
                 clf_head = clf_head.eval()
                 dev_loss, dev_metrics = utils.compute_loss_metrics(
-                    dev_loader, bert_model, clf_head, label_map, grad_required=False
+                    dev_loader, bert_model, clf_head, label_map, grad_required=False, return_metrics=False
                 )
                 dev_loss = dev_loss.mean()
 
@@ -345,7 +357,7 @@ def main():
         label_map = None
     else:
         raise ValueError(f"Unknown task or incorrect `config.data_dir`: {config.data_dir}")
-    
+
     # NOTE: if `label_map` is None, the task is not sequence labeing
     bert_model = model_utils.BERT(config)
     if label_map is not None:
@@ -356,17 +368,23 @@ def main():
             data_class(p, config.max_seq_length, config.model_type, train_max_examples) for p in tqdm(train_paths)
         ]
         logger.info("Creating dev sets...")
-        dev_set = [data_class(p, config.max_seq_length, config.model_type, dev_max_examples) for p in tqdm(dev_paths)]
-        clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size()) 
+        dev_set = [
+            data_class(p, config.max_seq_length, config.model_type, dev_max_examples) for p in tqdm(dev_paths)
+        ]
+        clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size())
     else:
         logger.info("Creating train sets...")
         train_set = [
-            data_class(p, config.max_clen, config.max_qlen, config.doc_stride, config.model_type) for p in tqdm(train_paths)
+            data_class(p, config.max_clen, config.max_qlen, config.doc_stride, config.model_type)
+            for p in tqdm(train_paths)
         ]
         logger.info("Creating dev sets...")
-        dev_set = [data_class(p, config.max_clen, config.max_qlen, config.doc_stride, config.model_type) for p in tqdm(dev_paths)]
+        dev_set = [
+            data_class(p, config.max_clen, config.max_qlen, config.doc_stride, config.model_type)
+            for p in tqdm(dev_paths)
+        ]
         clf_head = model_utils.ClfHead(config.hidden_dropout_prob, bert_model.get_hidden_size())
-    
+
     if args.load_from:
         logger.info(f"Resuming training with weights from {args.load_from}")
         utils.set_savedir_name(args.load_from.split("/")[-1])

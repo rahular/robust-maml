@@ -25,7 +25,6 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
 savedir = None
 
 
@@ -73,13 +72,13 @@ def compute_metrics(predictions, label_ids, label_map):
     }
 
 
-def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=True):
+def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=True, return_metrics=True):
     loss = None
     gold, preds = None, None
     for features in loader:
         # it is done this way to be consistent with both outer (regular) and inner (meta) dataloaders
         input_ids, attention_mask, token_type_ids, labels = features[0], features[1], features[2], features[3]
-        with torch.no_grad():
+        with torch.set_grad_enabled(bert_model.training and grad_required):
             bert_output = bert_model(input_ids, attention_mask, token_type_ids)
         with torch.set_grad_enabled(grad_required):
             output = learner(bert_output, labels=labels, attention_mask=attention_mask)
@@ -88,7 +87,7 @@ def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=T
         else:
             loss = torch.cat([loss, output.loss], 0)
 
-        if label_map is not None:  # HACK: easiest way to identify if the task not sequence labeling
+        if return_metrics and label_map is not None:  # HACK: easiest way to identify if the task not sequence labeling
             for lgt, lbl in zip(output.logits, labels):
                 if preds is None:
                     preds = torch.unsqueeze(lgt.detach().cpu(), 0)
@@ -111,7 +110,13 @@ def qa_evaluate(lang, examples, features, model_type, loader, bert_model, learne
     loss = []
     for batch in loader:
         with torch.no_grad():
-            input_ids, attention_mask, token_type_ids, labels, unique_ids = batch[0], batch[1], batch[2], batch[3], batch[4]
+            input_ids, attention_mask, token_type_ids, labels, unique_ids = (
+                batch[0],
+                batch[1],
+                batch[2],
+                batch[3],
+                batch[4],
+            )
             bert_output = bert_model(input_ids, attention_mask, token_type_ids)
             outputs = learner(bert_output, labels=labels, attention_mask=attention_mask)
             loss.append(outputs.loss.mean().item())

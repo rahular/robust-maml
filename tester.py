@@ -26,7 +26,9 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config, args):
     loader = DataLoader(test_set, batch_size=config.batch_size, collate_fn=utils.collate_fn)
     if label_map is not None:
-        loss, metrics = utils.compute_loss_metrics(loader, bert_model, clf_head, label_map)
+        loss, metrics = utils.compute_loss_metrics(
+            loader, bert_model, clf_head, label_map, grad_required=False, return_metrics=True
+        )
     else:
         loss, metrics = utils.qa_evaluate(
             args.test_lang,
@@ -62,7 +64,9 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
             support_loader = DataLoader(
                 data_utils.InnerDataset(support_task), batch_size=task_bs, shuffle=True, num_workers=0
             )
-            support_error, _ = utils.compute_loss_metrics(support_loader, bert_model, learner, label_map)
+            support_error, _ = utils.compute_loss_metrics(
+                support_loader, bert_model, learner, label_map, grad_required=True, return_metrics=False
+            )
             grads = torch.autograd.grad(
                 support_error.mean(), learner.parameters(), create_graph=True, allow_unused=True
             )
@@ -74,7 +78,7 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
         )
         if label_map is not None:
             query_error, metrics = utils.compute_loss_metrics(
-                query_loader, bert_model, learner, label_map, grad_required=False
+                query_loader, bert_model, learner, label_map, grad_required=False, return_metrics=True
             )
             all_metrics["p"].append(metrics["precision"])
             all_metrics["r"].append(metrics["recall"])
