@@ -145,6 +145,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 # TODO: change `max_grad_norm` to something else?
                 grads = tuple([g.clamp_(-config.max_grad_norm, config.max_grad_norm) for g in grads])
                 l2l.algorithms.maml_update(learner, config.inner_lr, grads)
+                opt.zero_grad()
 
             dev_loader = DataLoader(
                 data_utils.InnerDataset(dev_task), batch_size=task_bs, shuffle=False, num_workers=0
@@ -263,7 +264,7 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
         ]
         opt = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.outer_lr)
     else:
-        opt = AdamW(list(clf_head.parameters()), eps=1e-8, lr=config.outer_lr)
+        opt = Adam(clf_head.parameters(), lr=config.outer_lr)
         bert_model = bert_model.eval()
 
     best_dev_error = np.inf
