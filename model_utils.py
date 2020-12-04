@@ -55,7 +55,14 @@ class SeqClfHead(nn.Module):
     def __init__(self, num_labels, hidden_dropout_prob, bert_hidden_size):
         super(SeqClfHead, self).__init__()
         self.num_labels = num_labels
-        self.classifier = nn.Linear(bert_hidden_size, num_labels)
+        self.classifier = nn.Sequential(
+            nn.Dropout(hidden_dropout_prob),
+            nn.Linear(bert_hidden_size, 1024),
+            nn.Dropout(hidden_dropout_prob),
+            nn.ReLU(),
+            nn.Linear(1024, num_labels),
+        )
+        # self.classifier = nn.Linear(bert_hidden_size, num_labels)
         self.loss_fct = CrossEntropyLoss(reduction="none")
 
     def forward(
@@ -85,6 +92,13 @@ class SeqClfHead(nn.Module):
 class ClfHead(nn.Module):
     def __init__(self, hidden_dropout_prob, bert_hidden_size):
         super(ClfHead, self).__init__()
+        # self.classifier = nn.Sequential(
+        #     nn.Dropout(hidden_dropout_prob),
+        #     nn.Linear(bert_hidden_size, 1024),
+        #     nn.Dropout(hidden_dropout_prob),
+        #     nn.ReLU(),
+        #     nn.Linear(1024, 2),
+        # )
         self.classifier = nn.Linear(bert_hidden_size, 2)
 
     def forward(
