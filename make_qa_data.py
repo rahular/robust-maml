@@ -11,6 +11,8 @@ import json
 import random
 import numpy as np
 
+import unicodedata as u
+
 from collections import defaultdict
 from shutil import copyfile
 
@@ -29,6 +31,20 @@ def count(data):
             for qa in p["qas"]:
                 qlens.append(len(qa["question"]))
     return qs, np.mean(clens), np.std(clens), np.max(clens), np.mean(qlens), np.std(qlens), np.max(qlens)
+
+
+def normalize(data):
+    ndata = []
+    for dp in data:
+        dp["title"] = u.normalize('NFKC', dp["title"])
+        for p in dp["paragraphs"]:
+            p["context"] = u.normalize('NFKC', p["context"])
+            for qa in p["qas"]:
+                qa["question"] = u.normalize('NFKC', qa["question"])
+                for a in qa["answers"]:
+                    a["text"] = u.normalize('NFKC', a["text"])
+        ndata.append(dp)
+    return ndata
 
 
 def print_stats():
@@ -63,6 +79,7 @@ def main():
         data = json.load(f)
         version = data["version"]
         data = data["data"]
+        data = normalize(data)
     langs = ["english", "arabic", "bengali", "finnish", "indonesian", "swahili", "korean", "russian", "telugu"]
     random.shuffle(langs)
     train_langs, test_langs = langs[:5], langs[5:]
