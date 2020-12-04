@@ -4,7 +4,7 @@
     "max_seq_length": 128,
     "batch_size": 128,
     "num_epochs": 2000,
-    "patience": 200,
+    "patience": -1,
     "seed": 42,
     "max_grad_norm": 5.0,
     "hidden_dropout_prob": 0.2,
@@ -15,9 +15,9 @@
     "task_batch_size": 20,
     "num_episodes": 32,
     "inner_loop_steps": 4,
-    "shots": 30,
+    "shots": 50,
     "train_type": "minmax",
-    "train_max_examples": 5000,
-    "dev_max_examples": 5000,
+    "train_max_examples": 1000000,
+    "dev_max_examples": 1000000,
     "finetune_enc": false
 }

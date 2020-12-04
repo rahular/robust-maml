@@ -17,7 +17,7 @@
     "inner_loop_steps": 4,
     "inner_lr": 0.1,
     "is_fomaml": true,
-    "train_max_examples": 5000,
+    "train_max_examples": 1000000,
     "dev_max_examples": 100,
     "finetune_enc": false
 }
