@@ -2,12 +2,13 @@
 This code is adapted from  https://github.com/cambridgeltl/parameter-factorization/blob/master/tools/split_wikiann.py
 
 To download WikiAnn, do:
->> mkdir -p data/wikiann && cd  data/wikiann
-Download the tar files from https://drive.google.com/drive/folders/1Q-xdT99SeaCghihGa7nRkcXGwRGUIsKN
->> find data/wikiann -name '*.tar.gz' -execdir tar -xzvf '{}' \;
->> rm data/wikiann/*.tar.gz
->> python make_ner_data.py data/wikiann (execute this file)
->> rm data/wikiann/wikiann-*.bio
+>> mkdir -p data/ner && cd  data/ner
+Download data/name_tagging folder from https://drive.google.com/drive/folders/1Q-xdT99SeaCghihGa7nRkcXGwRGUIsKN and unzip it
+NOTE: All files must be unzip to data/ner. If an additional name_tagging folder is created, then manually move them
+>> find data/ner -name '*.tar.gz' -execdir tar -xzvf '{}' \;
+>> rm data/ner/*.tar.gz
+>> python make_ner_data.py data/ner (execute this file)
+>> rm data/ner/wikiann-*.bio
 """
 
 import os
@@ -17,7 +18,7 @@ import random
 
 from shutil import copyfile
 
-random.seed(313)
+random.seed(42)
 basedir = sys.argv[1]
 # fmt: off
 test_langs = set(
@@ -77,17 +78,24 @@ def copy(langs, split):
 
 
 def collect():
+    global test_langs
     all_langs = set([d for d in os.listdir(basedir) if os.path.isdir(os.path.join(basedir, d))])
     train_langs = all_langs.difference(test_langs)
-    print("Train langs: ", len(train_langs))
-    print("Test langs: ", len(test_langs))
+    train_langs = list(sorted(train_langs))
+    test_langs = list(sorted(test_langs))
+    random.shuffle(train_langs)
+    random.shuffle(test_langs)
+    train_langs = train_langs[:50]
+    test_langs = test_langs[:15]
+    print("Train langs: ", train_langs)
+    print("Test langs: ", test_langs)
     copy(train_langs, "train")
     copy(train_langs, "dev")
     copy(test_langs, "test")
 
 
 def main():
-    # split_data()
+    split_data()
     collect()
 
 
