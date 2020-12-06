@@ -106,8 +106,7 @@ def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=T
 
 
 def qa_evaluate(lang, examples, features, model_type, loader, bert_model, learner, save_dir):
-    all_results = []
-    loss = []
+    all_results, loss, uids = [], [], []
     for batch in loader:
         with torch.no_grad():
             input_ids, attention_mask, token_type_ids, labels, unique_ids = (
@@ -127,30 +126,31 @@ def qa_evaluate(lang, examples, features, model_type, loader, bert_model, learne
             end_logits = outputs.end_logits[i].detach().cpu().tolist()
             result = SquadResult(unique_id, start_logits, end_logits)
             all_results.append(result)
+            uids.append(unique_id)
 
-        save_dir = os.path.join(save_dir, "result")
-        os.makedirs(save_dir, exist_ok=True)
-        output_prediction_file = os.path.join(save_dir, f"{lang}.predictions")
-        output_nbest_file = os.path.join(save_dir, f"{lang}.nbest_predictions")
-        features = [f for f in features if f.unique_id in unique_ids]
-        examples = [examples[f.example_index] for f in features]
-        predictions = compute_predictions_logits(
-            examples,
-            features,
-            all_results,
-            n_best_size=20,
-            max_answer_length=30,
-            do_lower_case=False,
-            output_prediction_file=output_prediction_file,
-            output_nbest_file=output_nbest_file,
-            output_null_log_odds_file=None,
-            verbose_logging=True,
-            version_2_with_negative=False,
-            null_score_diff_threshold=0.0,
-            tokenizer=AutoTokenizer.from_pretrained(model_type),
-        )
-        results = squad_evaluate(examples, predictions)
-        return torch.tensor(loss), dict(results)
+    save_dir = os.path.join(save_dir, "result")
+    os.makedirs(save_dir, exist_ok=True)
+    output_prediction_file = os.path.join(save_dir, f"{lang}.predictions")
+    output_nbest_file = os.path.join(save_dir, f"{lang}.nbest_predictions")
+    features = [f for f in features if f.unique_id in uids]
+    examples = [examples[f.example_index] for f in features]
+    predictions = compute_predictions_logits(
+        examples,
+        features,
+        all_results,
+        n_best_size=20,
+        max_answer_length=30,
+        do_lower_case=False,
+        output_prediction_file=output_prediction_file,
+        output_nbest_file=output_nbest_file,
+        output_null_log_odds_file=None,
+        verbose_logging=True,
+        version_2_with_negative=False,
+        null_score_diff_threshold=0.0,
+        tokenizer=AutoTokenizer.from_pretrained(model_type),
+    )
+    results = squad_evaluate(examples, predictions)
+    return torch.tensor(loss), dict(results)
 
 
 def collate_fn(batch):
