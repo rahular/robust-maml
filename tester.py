@@ -24,7 +24,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config, args):
-    loader = DataLoader(test_set, batch_size=config.batch_size, collate_fn=utils.collate_fn)
+    loader = DataLoader(test_set, batch_size=config.batch_size, shuffle=False, collate_fn=utils.collate_fn)
     if label_map is not None:
         loss, metrics = utils.compute_loss_metrics(
             loader, bert_model, clf_head, label_map, grad_required=False, return_metrics=True
@@ -145,7 +145,7 @@ def main():
     elif "/ner/" in data_dir:
         data_class = data_utils.NER
         label_map = {idx: l for idx, l in enumerate(data_utils.get_ner_labels())}
-    elif "/tydiqa" in data_dir:
+    elif "/tydiqa" in data_dir or "squad" in data_dir:
         data_class = data_utils.QA
         label_map = None
     else:

@@ -133,7 +133,7 @@ def qa_evaluate(lang, examples, features, model_type, loader, bert_model, learne
     output_prediction_file = os.path.join(save_dir, f"{lang}.predictions")
     output_nbest_file = os.path.join(save_dir, f"{lang}.nbest_predictions")
     features = [f for f in features if f.unique_id in uids]
-    examples = [examples[f.example_index] for f in features]
+    # examples = [examples[f.example_index] for f in features]
     predictions = compute_predictions_logits(
         examples,
         features,
@@ -146,7 +146,7 @@ def qa_evaluate(lang, examples, features, model_type, loader, bert_model, learne
         output_null_log_odds_file=None,
         verbose_logging=True,
         version_2_with_negative=False,
-        null_score_diff_threshold=0.0,
+        null_score_diff_threshold=-np.inf,
         tokenizer=AutoTokenizer.from_pretrained(model_type),
     )
     results = squad_evaluate(examples, predictions)

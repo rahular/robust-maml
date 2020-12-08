@@ -353,7 +353,7 @@ def main():
     elif "/ner/" in data_dir:
         data_class = data_utils.NER
         label_map = {idx: l for idx, l in enumerate(data_utils.get_ner_labels())}
-    elif "/tydiqa/" in data_dir:
+    elif "/tydiqa/" in data_dir or "squad" in data_dir:
         data_class = data_utils.QA
         label_map = None
     else:
