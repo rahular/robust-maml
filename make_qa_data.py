@@ -83,7 +83,7 @@ def main():
     langs = ["arabic", "bengali", "finnish", "indonesian", "swahili", "korean", "russian", "telugu"]
     random.shuffle(langs)
     train_langs, test_langs = langs[:4], langs[4:]
-	train_langs += ["english"]
+    train_langs += ["english"]
     print(f"Train langs: {train_langs}")
     print(f"Test langs: {test_langs}")
 
