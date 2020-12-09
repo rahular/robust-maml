@@ -80,9 +80,10 @@ def main():
         version = data["version"]
         data = data["data"]
         data = normalize(data)
-    langs = ["english", "arabic", "bengali", "finnish", "indonesian", "swahili", "korean", "russian", "telugu"]
+    langs = ["arabic", "bengali", "finnish", "indonesian", "swahili", "korean", "russian", "telugu"]
     random.shuffle(langs)
-    train_langs, test_langs = langs[:5], langs[5:]
+    train_langs, test_langs = langs[:4], langs[4:]
+	train_langs += ["english"]
     print(f"Train langs: {train_langs}")
     print(f"Test langs: {test_langs}")
 
