@@ -36,13 +36,13 @@ def count(data):
 def normalize(data):
     ndata = []
     for dp in data:
-        dp["title"] = u.normalize('NFKC', dp["title"])
+        dp["title"] = u.normalize('NFKC', dp["title"]).replace(u"\xa0", u" ")
         for p in dp["paragraphs"]:
-            p["context"] = u.normalize('NFKC', p["context"])
+            p["context"] = u.normalize('NFKC', p["context"]).replace(u"\xa0", u" ")
             for qa in p["qas"]:
-                qa["question"] = u.normalize('NFKC', qa["question"])
+                qa["question"] = u.normalize('NFKC', qa["question"]).replace(u"\xa0", u" ")
                 for a in qa["answers"]:
-                    a["text"] = u.normalize('NFKC', a["text"])
+                    a["text"] = u.normalize('NFKC', a["text"]).replace(u"\xa0", u" ")
         ndata.append(dp)
     return ndata
 
