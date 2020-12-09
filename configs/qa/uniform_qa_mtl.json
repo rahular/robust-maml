@@ -17,7 +17,7 @@
     "num_episodes": 32,
     "task_batch_size": 20,
     "inner_loop_steps": 4,
-    "inner_lr": 0.1,
+    "inner_lr": 0.01,
     "is_fomaml": true,
     "finetune_enc": true
 }
