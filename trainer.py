@@ -298,8 +298,8 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
             torch.nn.utils.clip_grad_norm_(clf_head.parameters(), config.max_grad_norm)
             opt.step()
             running_loss += loss.item()
-            # eval
-            if (train_step + 1) % config.eval_freq == 0:
+            # eval at the beginning of every epoch and after every `config.eval_freq` steps
+            if train_step % config.eval_freq == 0:
                 bert_model = bert_model.eval()
                 clf_head = clf_head.eval()
                 dev_loss, dev_metrics = utils.compute_loss_metrics(
