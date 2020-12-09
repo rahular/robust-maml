@@ -108,7 +108,13 @@ def main():
 
     # copy real dev files as test files
     for lang in test_langs:
-        copyfile(test_path.format(lang), os.path.join(save_dir, f"{lang}.test"))
+        with open(test_path.format(lang), "r") as f:
+            data = json.load(f)
+            version = data["version"]
+            data = data["data"]
+            data = normalize(data)
+        with open(os.path.join(save_dir, f"{lang}.test"), "w") as f:
+            json.dump({"version": version, "data": data}, f)
 
     print_stats()
 
