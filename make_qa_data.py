@@ -21,6 +21,46 @@ save_dir = "./data/tydiqa/all"
 test_path = "./data/tydiqa/tydiqa-goldp-v1.1-dev/tydiqa-goldp-dev-{}.json"
 
 
+def _clean_text(text):
+    output = []
+    for char in text:
+        cp = ord(char)
+        if cp == 0 or cp == 0xFFFD or _is_control(char):
+            continue
+        if _is_whitespace(char):
+            output.append(" ")
+        else:
+            output.append(char)
+    return "".join(output)
+
+
+def _is_whitespace(char):
+    if char == " " or char == "\t" or char == "\n" or char == "\r":
+        return True
+    cat = u.category(char)
+    if cat == "Zs":
+        return True
+    return False
+
+
+def _is_control(char):
+    if char == "\t" or char == "\n" or char == "\r":
+        return False
+    cat = u.category(char)
+    if cat in ("Cc", "Cf"):
+        return True
+    return False
+
+
+def convert_to_unicode(text):
+	if isinstance(text, str):
+		return text
+	elif isinstance(text, bytes):
+		return text.decode("utf-8", "ignore")
+	else:
+		raise ValueError("Unsupported string type: %s" % (type(text)))
+
+
 def count(data):
     qs = 0
     qlens, clens = [], []
@@ -33,18 +73,26 @@ def count(data):
     return qs, np.mean(clens), np.std(clens), np.max(clens), np.mean(qlens), np.std(qlens), np.max(qlens)
 
 
-def normalize(data):
-    ndata = []
-    for dp in data:
-        dp["title"] = u.normalize('NFKC', dp["title"]).replace(u"\xa0", u" ")
-        for p in dp["paragraphs"]:
-            p["context"] = u.normalize('NFKC', p["context"]).replace(u"\xa0", u" ")
-            for qa in p["qas"]:
-                qa["question"] = u.normalize('NFKC', qa["question"]).replace(u"\xa0", u" ")
-                for a in qa["answers"]:
-                    a["text"] = u.normalize('NFKC', a["text"]).replace(u"\xa0", u" ")
-        ndata.append(dp)
-    return ndata
+def clean_and_normalize(dp):
+    dp["title"] = _clean_text(convert_to_unicode(dp["title"]))
+    for p in dp["paragraphs"]:
+        p["context"] = _clean_text(convert_to_unicode(p["context"]))
+        for qa in p["qas"]:
+            qa["question"] = _clean_text(convert_to_unicode(qa["question"]))
+            for a in qa["answers"]:
+                a["text"] = _clean_text(convert_to_unicode(a["text"]))
+    return dp
+
+
+def normalize(dp):
+    dp["title"] = u.normalize('NFKC', dp["title"]).replace(u"\xa0", u" ")
+    for p in dp["paragraphs"]:
+        p["context"] = u.normalize('NFKC', p["context"]).replace(u"\xa0", u" ")
+        for qa in p["qas"]:
+            qa["question"] = u.normalize('NFKC', qa["question"]).replace(u"\xa0", u" ")
+            for a in qa["answers"]:
+                a["text"] = u.normalize('NFKC', a["text"]).replace(u"\xa0", u" ")
+    return dp
 
 
 def print_stats():
@@ -79,7 +127,6 @@ def main():
         data = json.load(f)
         version = data["version"]
         data = data["data"]
-        data = normalize(data)
     langs = ["english", "arabic", "bengali", "finnish", "indonesian", "swahili", "korean", "russian", "telugu"]
     random.shuffle(langs)
     train_langs, test_langs = langs[:5], langs[5:]
@@ -91,7 +138,10 @@ def main():
         lang = dp["paragraphs"][0]["qas"][0]["id"].split("-")[0]
         if lang not in langs:
             raise ValueError("Datapoint does not have a valid id: {}".format(dp["id"]))
-        datasets[lang].append(dp)
+        elif lang in ["russian", "korean"]:
+            datasets[lang].append(clean_and_normalize(dp))
+        else:
+            datasets[lang].append(normalize(dp))
     assert len(data) == sum(len(ds) for ds in datasets.values())
     for ds in datasets.values():
         random.shuffle(ds)
@@ -110,11 +160,16 @@ def main():
     for lang in test_langs:
         with open(test_path.format(lang), "r") as f:
             data = json.load(f)
-            version = data["version"]
-            data = data["data"]
-            data = normalize(data)
+        version = data["version"]
+        data = data["data"]
+        clean_data = []
+        for dp in data:
+            if lang in ["russian", "korean"]:
+                clean_data.append(clean_and_normalize(dp))
+            else:
+                clean_data.append(normalize(dp)) 
         with open(os.path.join(save_dir, f"{lang}.test"), "w") as f:
-            json.dump({"version": version, "data": data}, f)
+            json.dump({"version": version, "data": clean_data}, f)
 
     print_stats()
 
