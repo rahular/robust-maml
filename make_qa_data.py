@@ -137,8 +137,8 @@ def main():
     datasets = defaultdict(list)
     for dp in data:
         lang = dp["paragraphs"][0]["qas"][0]["id"].split("-")[0]
-        if lang not in langs:
-            raise ValueError("Datapoint does not have a valid id: {}".format(dp["id"]))
+        if lang not in langs + ["english"]:
+            raise ValueError("Datapoint does not have a valid id: {}".format(dp["paragraphs"][0]["qas"][0]["id"]))
         elif lang in ["russian", "korean"]:
             datasets[lang].append(clean_and_normalize(dp))
         else:

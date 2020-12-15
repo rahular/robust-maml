@@ -60,6 +60,8 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
     for _ in tqdm_bar:
         learner = meta_model.clone()
         support_task, query_task = task.test_sample(k=shots)
+        bert_model.train()
+        learner.train()
         for _ in range(inner_loop_steps):
             support_loader = DataLoader(
                 data_utils.InnerDataset(support_task), batch_size=task_bs, shuffle=True, num_workers=0
@@ -73,6 +75,8 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
             l2l.algorithms.maml_update(learner, inner_lr, grads)
             task_support_error += support_error
 
+        bert_model.eval()
+        learner.eval()
         query_loader = DataLoader(
             data_utils.InnerDataset(query_task), batch_size=task_bs, shuffle=False, num_workers=0
         )
@@ -160,9 +164,9 @@ def main():
         clf_head = model_utils.ClfHead(config.hidden_dropout_prob, bert_model.get_hidden_size())
     if os.path.isfile(load_encoder_path):
         bert_model.load_state_dict(utils.clean_keys(torch.load(load_encoder_path)))
-    bert_model = bert_model.eval().to(DEVICE)
+    bert_model = bert_model.to(DEVICE)
     clf_head.load_state_dict(utils.clean_keys(torch.load(load_head_path)))
-    clf_head = clf_head.eval().to(DEVICE)
+    clf_head = clf_head.to(DEVICE)
 
     # shots = args.shots
     shots = [0, 1, 2, 5, 10]

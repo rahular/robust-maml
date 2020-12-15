@@ -78,7 +78,7 @@ def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=T
     for features in loader:
         # it is done this way to be consistent with both outer (regular) and inner (meta) dataloaders
         input_ids, attention_mask, token_type_ids, labels = features[0], features[1], features[2], features[3]
-        with torch.set_grad_enabled(bert_model.training and grad_required):
+        with torch.set_grad_enabled(grad_required):
             bert_output = bert_model(input_ids, attention_mask, token_type_ids)
         with torch.set_grad_enabled(grad_required):
             output = learner(bert_output, labels=labels, attention_mask=attention_mask)
@@ -224,3 +224,12 @@ class BalancedTaskSampler(data.sampler.Sampler):
                 final_samples_list.extend(cur_samples)
 
         return iter(final_samples_list)
+
+
+def clip_grad_norm(grads, max_norm):
+    device = grads[0].device
+    total_norm = torch.norm(torch.stack([torch.norm(grad.detach(), 2).to(device) for grad in grads]), 2)
+    clip_coef = max_norm / (total_norm + 1e-6)
+    if clip_coef < 1:
+        grads = [grad.detach().mul_(clip_coef.to(grad.device)) for grad in grads]
+    return tuple(grads)
