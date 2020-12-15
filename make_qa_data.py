@@ -53,12 +53,12 @@ def _is_control(char):
 
 
 def convert_to_unicode(text):
-	if isinstance(text, str):
-		return text
-	elif isinstance(text, bytes):
-		return text.decode("utf-8", "ignore")
-	else:
-		raise ValueError("Unsupported string type: %s" % (type(text)))
+    if isinstance(text, str):
+        return text
+    elif isinstance(text, bytes):
+        return text.decode("utf-8", "ignore")
+    else:
+        raise ValueError("Unsupported string type: %s" % (type(text)))
 
 
 def count(data):
@@ -85,13 +85,13 @@ def clean_and_normalize(dp):
 
 
 def normalize(dp):
-    dp["title"] = u.normalize('NFKC', dp["title"]).replace(u"\xa0", u" ")
+    dp["title"] = u.normalize("NFKC", dp["title"]).replace("\xa0", " ")
     for p in dp["paragraphs"]:
-        p["context"] = u.normalize('NFKC', p["context"]).replace(u"\xa0", u" ")
+        p["context"] = u.normalize("NFKC", p["context"]).replace("\xa0", " ")
         for qa in p["qas"]:
-            qa["question"] = u.normalize('NFKC', qa["question"]).replace(u"\xa0", u" ")
+            qa["question"] = u.normalize("NFKC", qa["question"]).replace("\xa0", " ")
             for a in qa["answers"]:
-                a["text"] = u.normalize('NFKC', a["text"]).replace(u"\xa0", u" ")
+                a["text"] = u.normalize("NFKC", a["text"]).replace("\xa0", " ")
     return dp
 
 
@@ -127,9 +127,10 @@ def main():
         data = json.load(f)
         version = data["version"]
         data = data["data"]
-    langs = ["english", "arabic", "bengali", "finnish", "indonesian", "swahili", "korean", "russian", "telugu"]
+    langs = ["arabic", "bengali", "finnish", "indonesian", "swahili", "korean", "russian", "telugu"]
     random.shuffle(langs)
-    train_langs, test_langs = langs[:5], langs[5:]
+    train_langs, test_langs = langs[:4], langs[4:]
+    train_langs += ["english"]
     print(f"Train langs: {train_langs}")
     print(f"Test langs: {test_langs}")
 
@@ -167,7 +168,7 @@ def main():
             if lang in ["russian", "korean"]:
                 clean_data.append(clean_and_normalize(dp))
             else:
-                clean_data.append(normalize(dp)) 
+                clean_data.append(normalize(dp))
         with open(os.path.join(save_dir, f"{lang}.test"), "w") as f:
             json.dump({"version": version, "data": clean_data}, f)
 
