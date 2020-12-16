@@ -3,6 +3,7 @@ import json
 import argparse
 import torch
 import logging
+import copy
 
 import utils
 import data_utils
@@ -25,6 +26,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config, args):
     loader = DataLoader(test_set, batch_size=config.batch_size, shuffle=False, collate_fn=utils.collate_fn)
+    bert_model.eval().to(DEVICE)
+    clf_head.eval().to(DEVICE)
     if label_map is not None:
         loss, metrics = utils.compute_loss_metrics(
             loader, bert_model, clf_head, label_map, grad_required=False, return_metrics=True
@@ -51,38 +54,37 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
     inner_loop_steps = config.inner_loop_steps
     inner_lr = config.inner_lr
 
-    meta_model = l2l.algorithms.MAML(clf_head, lr=inner_lr, first_order=config.is_fomaml)
-
     task_support_error = 0.0
     tqdm_bar = tqdm(range(num_episodes))
     all_metrics = defaultdict(list)
 
     for _ in tqdm_bar:
-        learner = meta_model.clone()
+        learner = copy.deepcopy(clf_head).to(DEVICE)
+        encoder = copy.deepcopy(bert_model).to(DEVICE)
+        optimizer = optim.SGD(list(learner.parameters()) + list(encoder.parameters()), lr=inner_lr)
         support_task, query_task = task.test_sample(k=shots)
-        bert_model.train()
+        encoder.train()
         learner.train()
         for _ in range(inner_loop_steps):
             support_loader = DataLoader(
                 data_utils.InnerDataset(support_task), batch_size=task_bs, shuffle=True, num_workers=0
             )
             support_error, _ = utils.compute_loss_metrics(
-                support_loader, bert_model, learner, label_map, grad_required=True, return_metrics=False
+                support_loader, encoder, learner, label_map, grad_required=True, return_metrics=False
             )
-            grads = torch.autograd.grad(
-                support_error.mean(), learner.parameters(), create_graph=True, allow_unused=True
-            )
-            l2l.algorithms.maml_update(learner, inner_lr, grads)
-            task_support_error += support_error
+            support_error.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            task_support_error += support_error.item()
 
-        bert_model.eval()
+        encoder.eval()
         learner.eval()
         query_loader = DataLoader(
             data_utils.InnerDataset(query_task), batch_size=task_bs, shuffle=False, num_workers=0
         )
         if label_map is not None:
             query_error, metrics = utils.compute_loss_metrics(
-                query_loader, bert_model, learner, label_map, grad_required=False, return_metrics=True
+                query_loader, encoder, learner, label_map, grad_required=False, return_metrics=True
             )
             all_metrics["p"].append(metrics["precision"])
             all_metrics["r"].append(metrics["recall"])
@@ -94,7 +96,7 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
                 test_set.features,
                 config.model_type,
                 query_loader,
-                bert_model,
+                encoder,
                 learner,
                 args.model_path,
             )
@@ -164,9 +166,7 @@ def main():
         clf_head = model_utils.ClfHead(config.hidden_dropout_prob, bert_model.get_hidden_size())
     if os.path.isfile(load_encoder_path):
         bert_model.load_state_dict(utils.clean_keys(torch.load(load_encoder_path)))
-    bert_model = bert_model.to(DEVICE)
     clf_head.load_state_dict(utils.clean_keys(torch.load(load_head_path)))
-    clf_head = clf_head.to(DEVICE)
 
     # shots = args.shots
     shots = [0, 1, 2, 5, 10]
