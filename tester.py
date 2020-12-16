@@ -72,6 +72,7 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
             support_error, _ = utils.compute_loss_metrics(
                 support_loader, encoder, learner, label_map, grad_required=True, return_metrics=False
             )
+            support_error = support_error.mean()
             support_error.backward()
             optimizer.step()
             optimizer.zero_grad()
