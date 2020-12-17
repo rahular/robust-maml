@@ -198,11 +198,11 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                     train_iteration_error, dev_iteration_error.item()
                 )
             )
-        if config.optim == "adam":
+        if config.train_type == "metabase":
             dev_iteration_error.backward()
             torch.nn.utils.clip_grad_norm_(opt_params, config.max_grad_norm)
             opt.step()
-        elif config.optim == "alcgd":
+        else:
             opt.step(loss=dev_iteration_error)
         opt.zero_grad()
 

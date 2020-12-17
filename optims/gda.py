@@ -53,7 +53,7 @@ class GDA(object):
         time_step = self.state['step'] + 1
         self.state['step'] = time_step
 
-        grad_x = autograd.grad(loss, self.max_params)
+        grad_x = autograd.grad(loss, self.max_params, retain_graph=True)
         cg_x = torch.cat([g.contiguous().view(-1) for g in grad_x])
         grad_y = autograd.grad(loss, self.min_params)
         cg_y = torch.cat([g.contiguous().view(-1) for g in grad_y])
