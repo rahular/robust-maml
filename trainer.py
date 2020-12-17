@@ -20,7 +20,7 @@ from transformers.optimization import AdamW
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import ConcatDataset, DataLoader
 
-from optims import ALCGD
+from optims import ALCGD, GDA
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
@@ -78,30 +78,31 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
         for param in bert_model.parameters():
             param.requires_grad = False
 
-    if config.optim == "adam":
-        opt_params = list(meta_model.parameters())
-        if config.finetune_enc:
-            opt_params += list(bert_model.parameters())
-        if config.train_type != "metabase":
-            opt_params += list(train_taskset.parameters())
+    opt_params = list(meta_model.parameters())
+    if config.finetune_enc:
+        opt_params += list(bert_model.parameters())
+    if config.train_type == "metabase":
         opt = Adam(opt_params, lr=config.outer_lr)
-
-    elif config.optim == "alcgd":
-        if config.train_type == "metabase":
-            raise ValueError(f"ALCGD optimizer can only be used for `minmax` or `constrain` train types.")
-        opt_params = list(meta_model.parameters())
-        if config.finetune_enc:
-            opt_params += list(bert_model.parameters())
-        torch.backends.cudnn.benchmark = True
-        opt = ALCGD(
-            max_params=train_taskset.parameters(),
-            min_params=opt_params,
-            lr_max=config.outer_lr,
-            lr_min=config.outer_lr,
-            device=DEVICE,
-        )
     else:
-        raise ValueError(f"Invalid option: {config.optim} for `config.optim`")
+        if config.optim == "adam":
+            opt = GDA(
+                max_params=train_taskset.parameters(),
+                min_params=opt_params,
+                lr_max=config.outer_lr,
+                lr_min=config.outer_lr,
+                device=DEVICE,
+            )
+        elif config.optim == "alcgd":
+            torch.backends.cudnn.benchmark = True
+            opt = ALCGD(
+                max_params=train_taskset.parameters(),
+                min_params=opt_params,
+                lr_max=config.outer_lr,
+                lr_min=config.outer_lr,
+                device=DEVICE,
+            )
+        else:
+            raise ValueError(f"Invalid option: {config.optim} for `config.optim`")
 
     best_dev_error = np.inf
     if args.load_from:
@@ -203,6 +204,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             opt.step()
         elif config.optim == "alcgd":
             opt.step(loss=dev_iteration_error)
+        opt.zero_grad()
 
         if dev_iteration_error < best_dev_error:
             logger.info("Found new best model!")
