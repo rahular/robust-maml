@@ -20,7 +20,7 @@ from transformers.optimization import AdamW
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import ConcatDataset, DataLoader
 
-from optims import ALCGD
+from optims import ALCGD, GDA
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
@@ -74,34 +74,35 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
     task_bs = config.task_batch_size
     inner_loop_steps = config.inner_loop_steps
 
-    bert_model = bert_model.eval()
-    if config.optim == "adam":
-        opt_params = list(meta_model.parameters())
-        if config.finetune_enc:
-            # NOTE: this condition is never tested as we don't have infinite GPU memory
-            bert_model = bert_model.train()
-            opt_params += list(bert_model.parameters())
-        if config.train_type != "metabase":
-            opt_params += list(train_taskset.parameters())
+    if not config.finetune_enc:
+        for param in bert_model.parameters():
+            param.requires_grad = False
+
+    opt_params = list(meta_model.parameters())
+    if config.finetune_enc:
+        opt_params += list(bert_model.parameters())
+    if config.train_type == "metabase":
         opt = Adam(opt_params, lr=config.outer_lr)
-    elif config.optim == "alcgd":
-        if config.train_type == "metabase":
-            raise ValueError(f"ALCGD optimizer can only be used for `minmax` or `constrain` train types.")
-        opt_params = list(meta_model.parameters())
-        if config.finetune_enc:
-            # NOTE: this condition is never tested as we don't have infinite GPU memory
-            bert_model = bert_model.train()
-            opt_params += list(bert_model.parameters())
-        torch.backends.cudnn.benchmark = True
-        opt = ALCGD(
-            max_params=train_taskset.parameters(),
-            min_params=opt_params,
-            lr_max=config.outer_lr,
-            lr_min=config.outer_lr,
-            device=DEVICE,
-        )
     else:
-        raise ValueError(f"Invalid option: {config.optim} for `config.optim`")
+        if config.optim == "adam":
+            opt = GDA(
+                max_params=train_taskset.parameters(),
+                min_params=opt_params,
+                lr_max=config.outer_lr,
+                lr_min=config.outer_lr,
+                device=DEVICE,
+            )
+        elif config.optim == "alcgd":
+            torch.backends.cudnn.benchmark = True
+            opt = ALCGD(
+                max_params=train_taskset.parameters(),
+                min_params=opt_params,
+                lr_max=config.outer_lr,
+                lr_min=config.outer_lr,
+                device=DEVICE,
+            )
+        else:
+            raise ValueError(f"Invalid option: {config.optim} for `config.optim`")
 
     best_dev_error = np.inf
     if args.load_from:
@@ -126,6 +127,8 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
     for iteration in tqdm_bar:
         dev_iteration_error = 0.0
         train_iteration_error = 0.0
+        bert_model.train()
+        meta_model.train()
         opt.zero_grad()
         for episode_num in range(num_episodes):
             learner = meta_model.clone()
@@ -140,12 +143,11 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                     train_loader, bert_model, learner, label_map=label_map, grad_required=True, return_metrics=False
                 )
                 train_error = train_error.mean()
-                train_iteration_error += train_error
-                grads = torch.autograd.grad(train_error, learner.parameters(), create_graph=True, allow_unused=True)
+                train_iteration_error += train_error.item()
+                grads = torch.autograd.grad(train_error, learner.parameters())
                 # TODO: change `max_grad_norm` to something else?
-                grads = tuple([g.clamp_(-config.max_grad_norm, config.max_grad_norm) for g in grads])
+                grads = utils.clip_grad_norm(grads, config.max_grad_norm)
                 l2l.algorithms.maml_update(learner, config.inner_lr, grads)
-                opt.zero_grad()
 
             dev_loader = DataLoader(
                 data_utils.InnerDataset(dev_task), batch_size=task_bs, shuffle=False, num_workers=0
@@ -168,7 +170,6 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                     for loss_val, lang in zip(dev_error, train_langs):
                         constrain_loss_list[lang].append(loss_val.item())
                 dev_error = dev_error.mean() + ((dev_error - constrain_val) * imps).sum()
-
             elif config.train_type == "metabase":
                 dev_error = dev_error.mean()
             else:
@@ -184,25 +185,26 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 tb_writer.add_scalar("metrics/f1", dev_metrics["f1"], (iteration * num_epochs) + episode_num)
 
         dev_iteration_error /= num_episodes
-        train_iteration_error /= num_episodes
+        train_iteration_error /= num_episodes * inner_loop_steps
         if dev_metrics is not None:
             tqdm_bar.set_description(
                 "Train. Loss: {:.3f} Train F1: {:.3f} Val. Loss: {:.3f} Val. F1: {:.3f}".format(
-                    train_iteration_error.item(), train_metrics["f1"], dev_iteration_error.item(), dev_metrics["f1"]
+                    train_iteration_error, train_metrics["f1"], dev_iteration_error.item(), dev_metrics["f1"]
                 )
             )
         else:
             tqdm_bar.set_description(
                 "Train. Loss: {:.3f} Val. Loss: {:.3f}".format(
-                    train_iteration_error.item(), dev_iteration_error.item()
+                    train_iteration_error, dev_iteration_error.item()
                 )
             )
-        if config.optim == "adam":
+        if config.train_type == "metabase":
             dev_iteration_error.backward()
             torch.nn.utils.clip_grad_norm_(opt_params, config.max_grad_norm)
             opt.step()
-        elif config.optim == "alcgd":
+        else:
             opt.step(loss=dev_iteration_error)
+        opt.zero_grad()
 
         if dev_iteration_error < best_dev_error:
             logger.info("Found new best model!")
@@ -242,30 +244,33 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
     )
     num_epochs = config.num_epochs
 
-    if config.finetune_enc:
-        no_decay = ["bias", "LayerNorm.weight"]
-        optimizer_grouped_parameters = [
-            {
-                "params": [
-                    p
-                    for n, p in list(bert_model.named_parameters()) + list(clf_head.named_parameters())
-                    if not any(nd in n for nd in no_decay)
-                ],
-                "weight_decay": config.weight_decay,
-            },
-            {
-                "params": [
-                    p
-                    for n, p in list(bert_model.named_parameters()) + list(clf_head.named_parameters())
-                    if any(nd in n for nd in no_decay)
-                ],
-                "weight_decay": 0.0,
-            },
-        ]
-        opt = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.outer_lr)
+    if not config.finetune_enc:
+        for param in bert_model.parameters():
+            param.requires_grad = False
+        extra = []
     else:
-        opt = Adam(clf_head.parameters(), lr=config.outer_lr)
-        bert_model = bert_model.eval()
+        extra = list(bert_model.named_parameters())
+
+    no_decay = ["bias", "LayerNorm.weight"]
+    optimizer_grouped_parameters = [
+        {
+            "params": [
+                p
+                for n, p in list(clf_head.named_parameters()) + extra
+                if not any(nd in n for nd in no_decay)
+            ],
+            "weight_decay": config.weight_decay,
+        },
+        {
+            "params": [
+                p
+                for n, p in list(clf_head.named_parameters()) + extra
+                if any(nd in n for nd in no_decay)
+            ],
+            "weight_decay": 0.0,
+        },
+    ]
+    opt = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.outer_lr)
 
     best_dev_error = np.inf
     if args.load_from:
@@ -285,9 +290,8 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
         epoch_iterator = tqdm(train_loader, desc="Training")
         for train_step, (input_ids, attention_mask, token_type_ids, labels, _, _) in enumerate(epoch_iterator):
             # train
-            if config.finetune_enc:
-                bert_model = bert_model.train()
-            clf_head = clf_head.train()
+            bert_model.train()
+            clf_head.train()
             opt.zero_grad()
             bert_output = bert_model(input_ids, attention_mask, token_type_ids)
             output = clf_head(bert_output, labels=labels, attention_mask=attention_mask)
@@ -300,8 +304,8 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
             running_loss += loss.item()
             # eval at the beginning of every epoch and after every `config.eval_freq` steps
             if train_step % config.eval_freq == 0:
-                bert_model = bert_model.eval()
-                clf_head = clf_head.eval()
+                bert_model.eval()
+                clf_head.eval()
                 dev_loss, dev_metrics = utils.compute_loss_metrics(
                     dev_loader, bert_model, clf_head, label_map, grad_required=False, return_metrics=False
                 )
@@ -386,13 +390,12 @@ def main():
         ]
         clf_head = model_utils.ClfHead(config.hidden_dropout_prob, bert_model.get_hidden_size())
 
+    assert not (args.load_from and hasattr(config, "encoder_ckpt"))
     if args.load_from:
         logger.info(f"Resuming training with weights from {args.load_from}")
         utils.set_savedir_name(args.load_from.split("/")[-1])
         clf_head.load_state_dict(torch.load(os.path.join(args.load_from, "best_model.th")))
     if args.load_from or hasattr(config, "encoder_ckpt"):
-        if args.load_from and hasattr(config, "encoder_ckpt"):
-            raise ValueError("Conflict: both `load_from` and `encoder_ckpt` set.")
         load_path = args.load_from if not hasattr(config, "encoder_ckpt") else config.encoder_ckpt
         logger.info(f"Using encoder weights from {load_path}")
         bert_model.load_state_dict(torch.load(os.path.join(load_path, "best_encoder.th")))

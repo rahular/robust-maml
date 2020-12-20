@@ -58,12 +58,12 @@ run_ner() {
 run_qa() {
     run "finnish" $1
     run "korean" $1
-    run "russian" $1
-    run "indonesian" $1
-    run "telugu" $1
+#    run "russian" $1
+#    run "indonesian" $1
+#    run "telugu" $1
     run "bengali" $1
-    run "swahili" $1
-    run "english" $1
+#    run "swahili" $1
+#    run "english" $1
     run "arabic" $1
 }
 
