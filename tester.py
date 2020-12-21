@@ -124,9 +124,7 @@ def init_args():
     parser = argparse.ArgumentParser(description="Test POS tagging on various UD datasets")
     parser.add_argument("--test_lang", dest="test_lang", type=str, help="Language to test on", required=True)
     parser.add_argument("--model_path", dest="model_path", type=str, help="Path of the model to load", required=True)
-    # parser.add_argument(
-    #     "--shots", dest="shots", type=int, help="Number of examples to use for finetuning", required=True
-    # )
+    parser.add_argument("--inner_lr", type=float, help="New learning rate", default=0.)
     return parser.parse_args()
 
 
@@ -141,6 +139,8 @@ def main():
     logging.info("Loading model from path: {}".format(load_head_path))
 
     config = model_utils.Config(config_path)
+    if args.inner_lr:
+        config.inner_lr = args.inner_lr
     torch.manual_seed(config.seed)
 
     data_dir = config.data_dir
