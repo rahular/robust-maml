@@ -394,9 +394,13 @@ def main():
     if args.load_from:
         logger.info(f"Resuming training with weights from {args.load_from}")
         utils.set_savedir_name(args.load_from.split("/")[-1])
-        clf_head.load_state_dict(torch.load(os.path.join(args.load_from, "best_model.th")))
-    if args.load_from or hasattr(config, "encoder_ckpt"):
-        load_path = args.load_from if not hasattr(config, "encoder_ckpt") else config.encoder_ckpt
+        head_path = os.path.join(args.load_from, "best_model.th")
+        encoder_path = os.path.join(args.load_from, "best_encoder.th")
+        clf_head.load_state_dict(torch.load(head_path))
+        if os.path.isfile(encoder_path):
+            bert_model.load_state_dict(torch.load(encoder_path))
+    if hasattr(config, "encoder_ckpt"):
+        load_path = config.encoder_ckpt
         logger.info(f"Using encoder weights from {load_path}")
         bert_model.load_state_dict(torch.load(os.path.join(load_path, "best_encoder.th")))
     bert_model = bert_model.to(DEVICE)
