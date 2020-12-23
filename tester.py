@@ -58,7 +58,6 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
     tqdm_bar = tqdm(range(num_episodes))
     all_metrics = defaultdict(list)
 
-    encoder.eval()
     for _ in tqdm_bar:
         learner = copy.deepcopy(clf_head).to(DEVICE).train()
         encoder = copy.deepcopy(bert_model).to(DEVICE).eval()
@@ -122,7 +121,7 @@ def init_args():
     parser = argparse.ArgumentParser(description="Test POS tagging on various UD datasets")
     parser.add_argument("--test_lang", dest="test_lang", type=str, help="Language to test on", required=True)
     parser.add_argument("--model_path", dest="model_path", type=str, help="Path of the model to load", required=True)
-    parser.add_argument("--inner_lr", type=float, help="New learning rate", default=3e-4)
+    parser.add_argument("--inner_lr", type=float, help="New learning rate", default=0.)
     return parser.parse_args()
 
 
