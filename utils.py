@@ -72,13 +72,15 @@ def compute_metrics(predictions, label_ids, label_map):
     }
 
 
-def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=True, return_metrics=True):
+def compute_loss_metrics(
+    loader, bert_model, learner, label_map, grad_required=True, return_metrics=True, inner_loop=False
+):
     gold, preds, loss = None, None, None
     for features in loader:
         # it is done this way to be consistent with both outer (regular) and inner (meta) dataloaders
         input_ids, attention_mask, token_type_ids, labels = features[0], features[1], features[2], features[3]
-        with torch.set_grad_enabled(bert_model.training and grad_required):
-            # We want to set bert_model to train mode even if it is passed in eval model.
+        with torch.set_grad_enabled(bert_model.training and not inner_loop and grad_required):
+            # We want to set bert_model to train mode even if it is passed in eval mode.
             # Otherwise, dropout, etc. will not work. Hence get the mode, so that we can set it later.
             is_bert_training = bert_model.training
             bert_model = bert_model.train()
@@ -89,7 +91,7 @@ def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=T
             output = learner(bert_output, labels=labels, attention_mask=attention_mask)
         if loss is None:
             loss = output.loss
-        else:	
+        else:
             loss = torch.cat([loss, output.loss], 0)
 
         if return_metrics and label_map is not None:  # HACK: easiest way to identify if the task not sequence labeling

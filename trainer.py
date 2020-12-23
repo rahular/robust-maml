@@ -140,7 +140,13 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                     data_utils.InnerDataset(train_task), batch_size=task_bs, shuffle=False, num_workers=0
                 )
                 train_error, train_metrics = utils.compute_loss_metrics(
-                    train_loader, bert_model, learner, label_map=label_map, grad_required=True, return_metrics=False
+                    train_loader,
+                    bert_model,
+                    learner,
+                    label_map=label_map,
+                    grad_required=True,
+                    return_metrics=False,
+                    inner_loop=True,
                 )
                 train_error = train_error.mean()
                 train_iteration_error += train_error.item()
@@ -151,7 +157,9 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             dev_loader = DataLoader(
                 data_utils.InnerDataset(dev_task), batch_size=task_bs, shuffle=False, num_workers=0
             )
-            dev_error, dev_metrics = utils.compute_loss_metrics(dev_loader, bert_model, learner, label_map, grad_required=True, return_metrics=False)
+            dev_error, dev_metrics = utils.compute_loss_metrics(
+                dev_loader, bert_model, learner, label_map, grad_required=True, return_metrics=False
+            )
             if config.train_type == "minmax":
                 dev_error *= imps
                 dev_error = dev_error.sum()
@@ -193,9 +201,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             )
         else:
             tqdm_bar.set_description(
-                "Train. Loss: {:.3f} Val. Loss: {:.3f}".format(
-                    train_iteration_error, dev_iteration_error.item()
-                )
+                "Train. Loss: {:.3f} Val. Loss: {:.3f}".format(train_iteration_error, dev_iteration_error.item())
             )
         if config.train_type == "metabase":
             dev_iteration_error.backward()
@@ -253,19 +259,11 @@ def mtl_train(args, config, train_set, dev_set, label_map, bert_model, clf_head)
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
         {
-            "params": [
-                p
-                for n, p in list(clf_head.named_parameters()) + extra
-                if not any(nd in n for nd in no_decay)
-            ],
+            "params": [p for n, p in list(clf_head.named_parameters()) + extra if not any(nd in n for nd in no_decay)],
             "weight_decay": config.weight_decay,
         },
         {
-            "params": [
-                p
-                for n, p in list(clf_head.named_parameters()) + extra
-                if any(nd in n for nd in no_decay)
-            ],
+            "params": [p for n, p in list(clf_head.named_parameters()) + extra if any(nd in n for nd in no_decay)],
             "weight_decay": 0.0,
         },
     ]
@@ -372,9 +370,7 @@ def main():
             data_class(p, config.max_seq_length, config.model_type, train_max_examples) for p in tqdm(train_paths)
         ]
         logger.info("Creating dev sets...")
-        dev_set = [
-            data_class(p, config.max_seq_length, config.model_type, dev_max_examples) for p in tqdm(dev_paths)
-        ]
+        dev_set = [data_class(p, config.max_seq_length, config.model_type, dev_max_examples) for p in tqdm(dev_paths)]
         clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size())
     else:
         logger.info("Creating train sets...")
