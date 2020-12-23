@@ -58,12 +58,12 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
     tqdm_bar = tqdm(range(num_episodes))
     all_metrics = defaultdict(list)
 
+    encoder.eval()
     for _ in tqdm_bar:
         learner = copy.deepcopy(clf_head).to(DEVICE)
         encoder = copy.deepcopy(bert_model).to(DEVICE)
-        optimizer = optim.SGD(list(learner.parameters()) + list(encoder.parameters()), lr=inner_lr)
+        optimizer = optim.SGD(learner.parameters()), lr=inner_lr)
         support_task, query_task = task.test_sample(k=shots)
-        encoder.train()
         learner.train()
         for _ in range(inner_loop_steps):
             support_loader = DataLoader(
@@ -78,7 +78,6 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
             optimizer.zero_grad()
             task_support_error += support_error.item()
 
-        encoder.eval()
         learner.eval()
         query_loader = DataLoader(
             data_utils.InnerDataset(query_task), batch_size=task_bs, shuffle=False, num_workers=0
