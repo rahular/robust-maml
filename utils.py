@@ -78,8 +78,14 @@ def compute_loss_metrics(loader, bert_model, learner, label_map, grad_required=T
     for features in loader:
         # it is done this way to be consistent with both outer (regular) and inner (meta) dataloaders
         input_ids, attention_mask, token_type_ids, labels = features[0], features[1], features[2], features[3]
-        with torch.set_grad_enabled(grad_required):
+        with torch.set_grad_enabled(bert_model.training and grad_required):
+            # We want to set bert_model to train mode even if it is passed in eval model.
+            # Otherwise, dropout, etc. will not work. Hence get the mode, so that we can set it later.
+            is_bert_training = bert_model.training
+            bert_model = bert_model.train()
             bert_output = bert_model(input_ids, attention_mask, token_type_ids)
+            if not is_bert_training:
+                bert_model = bert_model.eval()
         with torch.set_grad_enabled(grad_required):
             output = learner(bert_output, labels=labels, attention_mask=attention_mask)
         if loss is None:
@@ -133,7 +139,6 @@ def qa_evaluate(lang, examples, features, model_type, loader, bert_model, learne
     output_prediction_file = os.path.join(save_dir, f"{lang}.predictions")
     output_nbest_file = os.path.join(save_dir, f"{lang}.nbest_predictions")
     features = [f for f in features if f.unique_id in uids]
-    # examples = [examples[f.example_index] for f in features]
     predictions = compute_predictions_logits(
         examples,
         features,
