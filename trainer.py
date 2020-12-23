@@ -145,7 +145,6 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 train_error = train_error.mean()
                 train_iteration_error += train_error.item()
                 grads = torch.autograd.grad(train_error, learner.parameters())
-                # TODO: change `max_grad_norm` to something else?
                 grads = utils.clip_grad_norm(grads, config.max_grad_norm)
                 l2l.algorithms.maml_update(learner, config.inner_lr, grads)
 

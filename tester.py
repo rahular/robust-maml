@@ -58,13 +58,12 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
     tqdm_bar = tqdm(range(num_episodes))
     all_metrics = defaultdict(list)
 
+    encoder.eval()
     for _ in tqdm_bar:
-        learner = copy.deepcopy(clf_head).to(DEVICE)
-        encoder = copy.deepcopy(bert_model).to(DEVICE)
-        optimizer = optim.SGD(list(learner.parameters()) + list(encoder.parameters()), lr=inner_lr)
+        learner = copy.deepcopy(clf_head).to(DEVICE).train()
+        encoder = copy.deepcopy(bert_model).to(DEVICE).eval()
+        optimizer = optim.SGD(learner.parameters(), lr=inner_lr)
         support_task, query_task = task.test_sample(k=shots)
-        encoder.train()
-        learner.train()
         for _ in range(inner_loop_steps):
             support_loader = DataLoader(
                 data_utils.InnerDataset(support_task), batch_size=task_bs, shuffle=True, num_workers=0
@@ -78,7 +77,6 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
             optimizer.zero_grad()
             task_support_error += support_error.item()
 
-        encoder.eval()
         learner.eval()
         query_loader = DataLoader(
             data_utils.InnerDataset(query_task), batch_size=task_bs, shuffle=False, num_workers=0
@@ -124,9 +122,7 @@ def init_args():
     parser = argparse.ArgumentParser(description="Test POS tagging on various UD datasets")
     parser.add_argument("--test_lang", dest="test_lang", type=str, help="Language to test on", required=True)
     parser.add_argument("--model_path", dest="model_path", type=str, help="Path of the model to load", required=True)
-    # parser.add_argument(
-    #     "--shots", dest="shots", type=int, help="Number of examples to use for finetuning", required=True
-    # )
+    parser.add_argument("--inner_lr", type=float, help="New learning rate", default=3e-4)
     return parser.parse_args()
 
 
@@ -141,6 +137,8 @@ def main():
     logging.info("Loading model from path: {}".format(load_head_path))
 
     config = model_utils.Config(config_path)
+    if args.inner_lr:
+        config.inner_lr = args.inner_lr
     torch.manual_seed(config.seed)
 
     data_dir = config.data_dir
