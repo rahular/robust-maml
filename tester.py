@@ -29,9 +29,7 @@ def zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config, args):
     bert_model.eval().to(DEVICE)
     clf_head.eval().to(DEVICE)
     if label_map is not None:
-        loss, metrics = utils.compute_loss_metrics(
-            loader, bert_model, clf_head, label_map, grad_required=False, return_metrics=True
-        )
+        loss, metrics = utils.compute_loss_metrics(loader, bert_model, clf_head, label_map, grad_required=False)
     else:
         loss, metrics = utils.qa_evaluate(
             args.test_lang,
@@ -60,7 +58,6 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
 
     for _ in tqdm_bar:
         learner = copy.deepcopy(clf_head).to(DEVICE).train()
-        # encoder = copy.deepcopy(bert_model).to(DEVICE).train()
         encoder = copy.deepcopy(bert_model).to(DEVICE).eval()
         optimizer = optim.SGD(learner.parameters(), lr=inner_lr)
         support_task, query_task = task.test_sample(k=shots)
@@ -69,7 +66,12 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
                 data_utils.InnerDataset(support_task), batch_size=task_bs, shuffle=True, num_workers=0
             )
             support_error, _ = utils.compute_loss_metrics(
-                support_loader, encoder, learner, label_map, grad_required=True, return_metrics=False, inner_loop=True
+                support_loader,
+                encoder,
+                learner,
+                label_map,
+                return_metrics=False,
+                enc_grad_required=config.finetune_enc,
             )
             support_error = support_error.mean()
             support_error.backward()
@@ -84,7 +86,7 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
         )
         if label_map is not None:
             query_error, metrics = utils.compute_loss_metrics(
-                query_loader, encoder, learner, label_map, grad_required=False, return_metrics=True
+                query_loader, encoder, learner, label_map, grad_required=False
             )
             all_metrics["p"].append(metrics["precision"])
             all_metrics["r"].append(metrics["recall"])
