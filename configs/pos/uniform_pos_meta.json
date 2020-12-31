@@ -19,5 +19,5 @@
     "train_type": "metabase",
     "train_max_examples": 1000000,
     "dev_max_examples": 1000000,
-    "finetune_enc": false
+    "finetune_enc": true
 }

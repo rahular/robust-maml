@@ -140,13 +140,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                     data_utils.InnerDataset(train_task), batch_size=task_bs, shuffle=False, num_workers=0
                 )
                 train_error, train_metrics = utils.compute_loss_metrics(
-                    train_loader,
-                    bert_model,
-                    learner,
-                    label_map=label_map,
-                    grad_required=True,
-                    return_metrics=False,
-                    inner_loop=True,
+                    train_loader, bert_model, learner, label_map=label_map, return_metrics=False
                 )
                 train_error = train_error.mean()
                 train_iteration_error += train_error.item()
@@ -158,7 +152,12 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 data_utils.InnerDataset(dev_task), batch_size=task_bs, shuffle=False, num_workers=0
             )
             dev_error, dev_metrics = utils.compute_loss_metrics(
-                dev_loader, bert_model, learner, label_map, grad_required=True, return_metrics=False
+                dev_loader,
+                bert_model,
+                learner,
+                label_map,
+                return_metrics=False,
+                enc_grad_required=config.finetune_enc,
             )
             if config.train_type == "minmax":
                 dev_error *= imps

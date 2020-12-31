@@ -60,6 +60,7 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
 
     for _ in tqdm_bar:
         learner = copy.deepcopy(clf_head).to(DEVICE).train()
+        # encoder = copy.deepcopy(bert_model).to(DEVICE).train()
         encoder = copy.deepcopy(bert_model).to(DEVICE).eval()
         optimizer = optim.SGD(learner.parameters(), lr=inner_lr)
         support_task, query_task = task.test_sample(k=shots)
@@ -68,7 +69,7 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
                 data_utils.InnerDataset(support_task), batch_size=task_bs, shuffle=True, num_workers=0
             )
             support_error, _ = utils.compute_loss_metrics(
-                support_loader, encoder, learner, label_map, grad_required=True, return_metrics=False
+                support_loader, encoder, learner, label_map, grad_required=True, return_metrics=False, inner_loop=True
             )
             support_error = support_error.mean()
             support_error.backward()
@@ -76,7 +77,8 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
             optimizer.zero_grad()
             task_support_error += support_error.item()
 
-        learner.eval()
+        encoder = encoder.eval()
+        learner = learner.eval()
         query_loader = DataLoader(
             data_utils.InnerDataset(query_task), batch_size=task_bs, shuffle=False, num_workers=0
         )
@@ -121,7 +123,7 @@ def init_args():
     parser = argparse.ArgumentParser(description="Test POS tagging on various UD datasets")
     parser.add_argument("--test_lang", dest="test_lang", type=str, help="Language to test on", required=True)
     parser.add_argument("--model_path", dest="model_path", type=str, help="Path of the model to load", required=True)
-    parser.add_argument("--inner_lr", type=float, help="New learning rate", default=0.)
+    parser.add_argument("--inner_lr", type=float, help="New learning rate", default=0.0)
     return parser.parse_args()
 
 
