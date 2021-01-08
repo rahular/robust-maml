@@ -18,5 +18,6 @@
     "inner_loop_steps": 4,
     "inner_lr": 5e-5,
     "is_fomaml": true,
-    "finetune_enc": true
+    "finetune_enc": true,
+    "task_batch_size": 32
 }
