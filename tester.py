@@ -8,6 +8,7 @@ import copy
 import utils
 import data_utils
 import model_utils
+import meta_utils
 
 import statistics as stat
 import learn2learn as l2l
@@ -16,6 +17,7 @@ from collections import defaultdict
 from torch import optim
 from tqdm import tqdm
 from torch.utils.data import DataLoader
+from transformers.optimization import AdamW
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
@@ -50,7 +52,6 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
     num_episodes = config.num_episodes
     task_bs = config.task_batch_size
     inner_loop_steps = config.inner_loop_steps
-    inner_lr = config.inner_lr
 
     task_support_error = 0.0
     tqdm_bar = tqdm(range(num_episodes))
@@ -58,8 +59,30 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
 
     for _ in tqdm_bar:
         learner = copy.deepcopy(clf_head).to(DEVICE).train()
-        encoder = copy.deepcopy(bert_model).to(DEVICE).eval()
-        optimizer = optim.SGD(learner.parameters(), lr=inner_lr)
+        encoder = copy.deepcopy(bert_model).to(DEVICE)
+        if not config.finetune_enc:
+            encoder.eval()
+            for param in encoder.parameters():
+                param.requires_grad = False
+            extra = []
+        else:
+            extra = list(encoder.named_parameters())
+            encoder.train()
+
+        if config.train_type == "mtl":
+            no_decay = ["bias", "LayerNorm.weight"]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [p for n, p in list(learner.named_parameters()) + extra if not any(nd in n for nd in no_decay)],
+                    "weight_decay": config.weight_decay,
+                },
+                {
+                    "params": [p for n, p in list(learner.named_parameters()) + extra if any(nd in n for nd in no_decay)],
+                    "weight_decay": 0.0,
+                },
+            ]
+            optimizer = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.outer_lr)
+
         support_task, query_task = task.test_sample(k=shots)
         for _ in range(inner_loop_steps):
             support_loader = DataLoader(
@@ -74,9 +97,14 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
                 enc_grad_required=config.finetune_enc,
             )
             support_error = support_error.mean()
-            support_error.backward()
-            optimizer.step()
-            optimizer.zero_grad()
+            if config.train_type == "mtl":
+                support_error.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+            else:
+                if config.finetune_enc:
+                    encoder.adapt(support_error, allow_unused=True, retain_graph=True)
+                learner.adapt(support_error)
             task_support_error += support_error.item()
 
         encoder = encoder.eval()
@@ -166,12 +194,17 @@ def main():
     else:
         test_set = data_class(test_path, config.max_clen, config.max_qlen, config.doc_stride, config.model_type)
         clf_head = model_utils.ClfHead(config.hidden_dropout_prob, bert_model.get_hidden_size())
+
+    if config.train_type != "mtl":
+        bert_model = meta_utils.ParamMetaSGD(bert_model, lr=config.inner_lr, first_order=config.is_fomaml)
+        clf_head = meta_utils.ParamMetaSGD(clf_head, lr=config.inner_lr, first_order=config.is_fomaml)
+
     if os.path.isfile(load_encoder_path):
-        bert_model.load_state_dict(utils.clean_keys(torch.load(load_encoder_path)))
-    clf_head.load_state_dict(utils.clean_keys(torch.load(load_head_path)))
+        bert_model.load_state_dict(torch.load(load_encoder_path))
+    clf_head.load_state_dict(torch.load(load_head_path))
 
     # shots = args.shots
-    shots = [0, 1, 2, 5, 10]
+    shots = [0, 5, 10, 20]
     summary_metrics = {}
     for shot in shots:
         if shot == 0:

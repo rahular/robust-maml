@@ -19,5 +19,7 @@
     "inner_loop_steps": 4,
     "shots": 30,
     "train_type": "minmax",
-    "finetune_enc": false
+    "finetune_enc": false,
+    "weight_decay": 0.1,
+    "eval_freq": 1000
 }

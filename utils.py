@@ -235,8 +235,8 @@ class BalancedTaskSampler(data.sampler.Sampler):
 
 def clip_grad_norm(grads, max_norm):
     device = grads[0].device
-    total_norm = torch.norm(torch.stack([torch.norm(grad.detach(), 2).to(device) for grad in grads]), 2)
+    total_norm = torch.norm(torch.stack([torch.norm(grad.detach(), 2).to(device) for grad in grads if grad is not None]), 2)
     clip_coef = max_norm / (total_norm + 1e-6)
     if clip_coef < 1:
-        grads = [grad.detach().mul_(clip_coef.to(grad.device)) for grad in grads]
+        grads = [grad.detach().mul_(clip_coef.to(grad.device)) if grad is not None else None for grad in grads]
     return tuple(grads)

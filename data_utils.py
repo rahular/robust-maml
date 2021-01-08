@@ -65,7 +65,10 @@ class InnerDataset(data.Dataset):
 class CustomLangTaskDataset(nn.Module):
     def __init__(self, datasets, train_type=None):
         super(CustomLangTaskDataset, self).__init__()
-        self.datasets = {d.lang: d for d in datasets}
+        if isinstance(datasets[0], data.Subset):
+            self.datasets = {d.dataset.lang: d for d in datasets}
+        else:
+            self.datasets = {d.lang: d for d in datasets}
         self.id2lang = {idx: lang for idx, lang in enumerate(sorted(self.datasets.keys()))}
         self.lang2id = {lang: idx for idx, lang in self.id2lang.items()}
         total_langs = len(self.datasets)
@@ -113,7 +116,10 @@ class CustomLangTaskDataset(nn.Module):
         X = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "label_ids": [], "unique_ids": []}
         Y = []
         for lang in langs:
-            x, y = self.datasets[lang].sample()
+            if isinstance(self.datasets[lang], data.Subset):
+                x, y = self.datasets[lang].dataset.sample()
+            else:
+                x, y = self.datasets[lang].sample()
             X = self._append_tensor(X, x)
             Y.append(y)
         X = self._stack_tensors(X)
@@ -528,4 +534,3 @@ def create_squad_examples(data_path):
                 )
                 examples.append(example)
     return examples
-

@@ -39,7 +39,7 @@ class BERT(nn.Module):
         super(BERT, self).__init__()
         self.config = config
         self.tokenizer = BertTokenizer.from_pretrained(self.config.model_type)
-        self.bert = BertModel.from_pretrained(self.config.model_type)
+        self.bert = BertModel.from_pretrained(self.config.model_type, add_pooling_layer=False)
 
     def get_hidden_size(self):
         return self.bert.config.hidden_size

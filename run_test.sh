@@ -115,5 +115,6 @@ run_qa() {
 ################# QA #################
 # only head
 # run_qa "2020-12-01_12-11-53-1BRT"  # baseline (train all and test all)
-run_qa "2020-12-15_11-56-22-E9PV"   # baseline (finetuned encoder + all langs)
+# run_qa "2020-12-15_11-56-22-E9PV"  # baseline (finetuned encoder + all langs)
 # run_qa "2020-12-07_01-04-52-X3SY"  # MTL (finetuned encoder)
+run_qa $1

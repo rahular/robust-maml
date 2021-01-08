@@ -93,8 +93,8 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
         extra = []
         meta_encoder = bert_model
     else:
-        meta_encoder = meta_utils.ParamMetaSGD(bert_model, lr=config.inner_lr, first_order=config.is_fomaml)
-        extra = [p for p in meta_encoder.parameters()]
+        meta_encoder = meta_utils.ParamMetaSGD(bert_model, lr=config.outer_lr, first_order=config.is_fomaml)
+        extra = list(meta_encoder.parameters())
 
     opt_params = list(meta_clf.parameters()) + extra
     if config.train_type == "metabase":
@@ -138,8 +138,6 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
             np.save(f, train_taskset.tau.detach().cpu().numpy())
 
     patience_ctr = 0
-    eval_freq = config.eval_freq // (config.inner_loop_steps + 1)
-    patience_over = False
     constrain_loss_list = defaultdict(lambda: deque(maxlen=10))
     tqdm_bar = tqdm(range(num_epochs))
     for iteration in tqdm_bar:
@@ -205,7 +203,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 dev_error.backward()
                 opt.step()
             else:
-                opt.step(loss=dev_error)
+                opt.step(loss=dev_iteration_error)
             opt.zero_grad()
 
             dev_iteration_error += dev_error.item()
@@ -218,46 +216,42 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 tb_writer.add_scalar("metrics/recall", dev_metrics["recall"], (iteration * num_epochs) + episode_num)
                 tb_writer.add_scalar("metrics/f1", dev_metrics["f1"], (iteration * num_epochs) + episode_num)
 
-            if episode_num and episode_num % eval_freq == 0:
-                dev_iteration_error /= eval_freq
-                train_iteration_error /= eval_freq * inner_loop_steps
-                if dev_metrics is not None:
-                    tqdm_bar.set_description(
-                        "Train. Loss: {:.3f} Train F1: {:.3f} Dev. Loss: {:.3f} Dev. F1: {:.3f}".format(
-                            train_iteration_error, train_metrics["f1"], dev_iteration_error, dev_metrics["f1"]
-                        )
-                    )
-                else:
-                    tqdm_bar.set_description(
-                        "Train. Loss: {:.3f} Dev. Loss: {:.3f}".format(train_iteration_error, dev_iteration_error)
-                    )
-
-                meta_clf.eval()
-                meta_encoder.eval()
-                eval_loss, _ = utils.compute_loss_metrics(
-                    eval_loader, meta_encoder, meta_clf, label_map, grad_required=False, return_metrics=False
+        dev_iteration_error /= num_episodes
+        train_iteration_error /= num_episodes * inner_loop_steps
+        if dev_metrics is not None:
+            tqdm_bar.set_description(
+                "Train. Loss: {:.3f} Train F1: {:.3f} Dev. Loss: {:.3f} Dev. F1: {:.3f}".format(
+                    train_iteration_error, train_metrics["f1"], dev_iteration_error, dev_metrics["f1"]
                 )
-                eval_error = eval_loss.mean()
+            )
+        else:
+            tqdm_bar.set_description(
+                "Train. Loss: {:.3f} Dev. Loss: {:.3f}".format(train_iteration_error, dev_iteration_error)
+            )
 
-                if eval_error < best_dev_error:
-                    logger.info("Found new best model!")
-                    best_dev_error = eval_error
-                    save(meta_clf, opt, args.config_path, iteration, meta_encoder if config.finetune_enc else None)
-                    save_dist("best_minmax_dist.npy")
-                    patience_ctr = 0
-                else:
-                    patience_ctr += 1
-                    if patience_ctr == config.patience:
-                        logger.info("Ran out of patience. Stopping training early...")
-                        patience_over = True
-                        break
-                dev_iteration_error = 0.
-                train_iteration_error = 0.
+        meta_clf.eval()
+        meta_encoder.eval()
+        eval_loss, _ = utils.compute_loss_metrics(
+            eval_loader, meta_encoder, meta_clf, label_map, grad_required=False, return_metrics=False
+        )
+        eval_error = eval_loss.mean()
+
+        if eval_error < best_dev_error:
+            logger.info("Found new best model!")
+            best_dev_error = eval_error
+            save(meta_clf, opt, args.config_path, iteration, meta_encoder if config.finetune_enc else None)
+            save_dist("best_minmax_dist.npy")
+            patience_ctr = 0
+        else:
+            patience_ctr += 1
+            if patience_ctr == config.patience:
+                logger.info("Ran out of patience. Stopping training early...")
+                break
+        dev_iteration_error = 0.
+        train_iteration_error = 0.
 
         if config.train_type != "metabase" and iteration % 10 == 0:
             save_dist("minmax_dist.npy")
-        if patience_over:
-            break
 
     logger.info(f"Best validation loss = {best_dev_error}")
     logger.info("Best model saved at: {}".format(utils.get_savedir_name()))
