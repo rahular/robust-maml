@@ -69,19 +69,22 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
             extra = list(encoder.named_parameters())
             encoder.train()
 
-        if config.train_type == "mtl":
-            no_decay = ["bias", "LayerNorm.weight"]
-            optimizer_grouped_parameters = [
-                {
-                    "params": [p for n, p in list(learner.named_parameters()) + extra if not any(nd in n for nd in no_decay)],
-                    "weight_decay": config.weight_decay,
-                },
-                {
-                    "params": [p for n, p in list(learner.named_parameters()) + extra if any(nd in n for nd in no_decay)],
-                    "weight_decay": 0.0,
-                },
-            ]
-            optimizer = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.outer_lr)
+        no_decay = ["bias", "LayerNorm.weight"]
+        optimizer_grouped_parameters = [
+            {
+                "params": [
+                    p for n, p in list(learner.named_parameters()) + extra if not any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": config.weight_decay,
+            },
+            {
+                "params": [
+                    p for n, p in list(learner.named_parameters()) + extra if any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.0,
+            },
+        ]
+        optimizer = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.outer_lr)
 
         support_task, query_task = task.test_sample(k=shots)
         for _ in range(inner_loop_steps):
@@ -97,14 +100,9 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
                 enc_grad_required=config.finetune_enc,
             )
             support_error = support_error.mean()
-            if config.train_type == "mtl":
-                support_error.backward()
-                optimizer.step()
-                optimizer.zero_grad()
-            else:
-                if config.finetune_enc:
-                    encoder.adapt(support_error, allow_unused=True, retain_graph=True)
-                learner.adapt(support_error)
+            support_error.backward()
+            optimizer.step()
+            optimizer.zero_grad()
             task_support_error += support_error.item()
 
         encoder = encoder.eval()
