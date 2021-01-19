@@ -6,8 +6,8 @@ import argparse
 import numpy as np
 import pandas as pd
 
-fmt_head = "{0:>6} {1:>7} {2:>7} {3:>7}"
-fmt_row = "{0:>6} {1:>7.2f} {2:>7.2f} {3:>7.2f}"
+fmt_head = "{0:>10} {1:>7} {2:>7} {3:>7}"
+fmt_row = "{0:>10} {1:>7.2f} {2:>7.2f} {3:>7.2f}"
 
 
 def init_args():
@@ -102,6 +102,17 @@ def for_qa(files, result_path):
     df["f20"] = f20
     df["f20_stdev"] = fs20
     df.to_csv(os.path.join(result_path, "combined_result.csv"))
+
+    print(fmt_head.format("", "mean", "wmean", "umean"))
+    print(fmt_row.format("k=0 (EM)", df["e0"].mean(), 0, 0))
+    print(fmt_row.format("k=0 (F1)", df["f0"].mean(), 0, 0))
+    print(fmt_row.format("k=5 (EM)", *get_stats(df["e5"], df["e5_stdev"])))
+    print(fmt_row.format("k=5 (F1)", *get_stats(df["f5"], df["f5_stdev"])))
+    print(fmt_row.format("k=10 (EM)", *get_stats(df["e10"], df["e10_stdev"])))
+    print(fmt_row.format("k=10 (F1)", *get_stats(df["f10"], df["f10_stdev"])))
+    print(fmt_row.format("k=20 (EM)", *get_stats(df["e20"], df["e20_stdev"])))
+    print(fmt_row.format("k=20 (F1)", *get_stats(df["f20"], df["f20_stdev"])))
+
 
 
 def main():
