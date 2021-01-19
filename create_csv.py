@@ -3,7 +3,11 @@ import json
 import tqdm
 import argparse
 
+import numpy as np
 import pandas as pd
+
+fmt_head = "{0:>6} {1:>7} {2:>7} {3:>7}"
+fmt_row = "{0:>6} {1:>7.2f} {2:>7.2f} {3:>7.2f}"
 
 
 def init_args():
@@ -12,6 +16,17 @@ def init_args():
         "--model_path", dest="model_path", type=str, help="Path of the model folder", required=True,
     )
     return parser.parse_args()
+
+
+def get_stats(x, s):
+    """ Here x is a list of numbers and s is a list of uncertaintites
+    This function returns the unweighted mean, the weighted mean, and the 
+    uncertainty on the mean.
+    """
+    mean = x.mean()
+    wmean = np.sum(x/s**2) / np.sum(1/s**2)
+    umean = np.sqrt(1/np.sum(1/s**2))
+    return mean, wmean, umean
 
 
 def for_seq_lbl(files, result_path):
@@ -37,6 +52,12 @@ def for_seq_lbl(files, result_path):
     df["k=10"] = k10
     df["10_std"] = s10
     df.to_csv(os.path.join(result_path, "combined_result.csv"))
+
+    print(fmt_head.format("", "mean", "wmean", "umean"))
+    print(fmt_row.format("k=0", df["k=0"].mean(), 0, 0))
+    print(fmt_row.format("k=5", *get_stats(df["k=5"], df["5_std"])))
+    print(fmt_row.format("k=10", *get_stats(df["k=10"], df["10_std"])))
+    print(fmt_row.format("k=20", *get_stats(df["k=20"], df["20_std"])))
 
 
 def for_qa(files, result_path):
