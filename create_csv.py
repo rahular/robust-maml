@@ -24,8 +24,8 @@ def get_stats(x, s):
     uncertainty on the mean.
     """
     mean = x.mean()
-    wmean = np.sum(x/s**2) / np.sum(1/s**2)
-    umean = np.sqrt(1/np.sum(1/s**2))
+    wmean = np.sum(x / s ** 2) / np.sum(1 / s ** 2)
+    umean = np.sqrt(1 / np.sum(1 / s ** 2))
     return mean, wmean, umean
 
 
@@ -61,8 +61,23 @@ def for_seq_lbl(files, result_path):
 
 
 def for_qa(files, result_path):
-    datasets, e0, f0, e5, f5, es5, fs5, e10, f10, es10, fs10, e20, f20, es20, fs20 = \
-        [], [], [], [], [], [], [], [], [], [], [], [], [], [], []
+    datasets, e0, f0, e5, f5, es5, fs5, e10, f10, es10, fs10, e20, f20, es20, fs20 = (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
     for file_ in tqdm.tqdm(sorted(files)):
         with open(file_, "r") as f:
             data = json.load(f)
@@ -114,7 +129,6 @@ def for_qa(files, result_path):
     print(fmt_row.format("k=20 (F1)", *get_stats(df["f20"], df["f20_stdev"])))
 
 
-
 def main():
     args = init_args()
     result_path = os.path.join(args.model_path, "result")
@@ -125,7 +139,6 @@ def main():
         for_qa(files, result_path)
     else:
         for_seq_lbl(files, result_path)
-
 
 
 if __name__ == "__main__":
