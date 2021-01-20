@@ -69,22 +69,27 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
             extra = list(encoder.named_parameters())
             encoder.train()
 
-        no_decay = ["bias", "LayerNorm.weight"]
-        optimizer_grouped_parameters = [
-            {
-                "params": [
-                    p for n, p in list(learner.named_parameters()) + extra if not any(nd in n for nd in no_decay)
-                ],
-                "weight_decay": config.weight_decay,
-            },
-            {
-                "params": [
-                    p for n, p in list(learner.named_parameters()) + extra if any(nd in n for nd in no_decay)
-                ],
-                "weight_decay": 0.0,
-            },
-        ]
-        optimizer = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.outer_lr)
+        if config.train_type == "mtl" or not config.use_train_lr:
+            no_decay = ["bias", "LayerNorm.weight"]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [
+                        p for n, p in list(learner.named_parameters()) + extra if not any(nd in n for nd in no_decay)
+                    ],
+                    "weight_decay": config.weight_decay,
+                },
+                {
+                    "params": [
+                        p for n, p in list(learner.named_parameters()) + extra if any(nd in n for nd in no_decay)
+                    ],
+                    "weight_decay": 0.0,
+                },
+            ]
+            optimizer = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.inner_lr)
+        else:
+            logger.info("Using learning rates adapted during training via MetaSGD.")
+            logger.info("Classifier: %s", [param.item() for param in learner.lrs])
+            logger.info("Encoder: %s", [param.item() for param in learner.lrs])
 
         support_task, query_task = task.test_sample(k=shots)
         for _ in range(inner_loop_steps):
@@ -100,9 +105,14 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
                 enc_grad_required=config.finetune_enc,
             )
             support_error = support_error.mean()
-            support_error.backward()
-            optimizer.step()
-            optimizer.zero_grad()
+            if config.train_type == "mtl" or not config.use_train_lr:
+                support_error.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+            else:
+                learner.adapt(support_error, retain_graph=config.finetune_enc)
+                if config.finetune_enc:
+                    encoder.adapt(support_error, allow_unused=True)
             task_support_error += support_error.item()
 
         encoder = encoder.eval()
@@ -152,6 +162,7 @@ def init_args():
     parser.add_argument("--test_lang", dest="test_lang", type=str, help="Language to test on", required=True)
     parser.add_argument("--model_path", dest="model_path", type=str, help="Path of the model to load", required=True)
     parser.add_argument("--inner_lr", type=float, help="New learning rate", default=0.0)
+    parser.add_argument("--use_train_lr", action="store_true", help="Use meta-learned learning rates")
     return parser.parse_args()
 
 
@@ -168,6 +179,7 @@ def main():
     config = model_utils.Config(config_path)
     if args.inner_lr:
         config.inner_lr = args.inner_lr
+    config.use_train_lr = args.use_train_lr
     torch.manual_seed(config.seed)
 
     data_dir = config.data_dir
