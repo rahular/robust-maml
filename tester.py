@@ -85,10 +85,6 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
                 },
             ]
             optimizer = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.inner_lr)
-        else:
-            logger.info("Using learning rates adapted during training via MetaSGD.")
-            logger.info("Classifier: %s", [param.item() for param in learner.lrs])
-            logger.info("Encoder: %s", [param.item() for param in learner.lrs])
 
         support_task, query_task = task.test_sample(k=shots)
         for _ in range(inner_loop_steps):
@@ -192,6 +188,7 @@ def main():
     elif "/tydiqa" in data_dir or "squad" in data_dir:
         data_class = data_utils.QA
         label_map = None
+        config.max_clen = 512
     else:
         raise ValueError(f"Unknown task or incorrect `config.data_dir`: {config.data_dir}")
 

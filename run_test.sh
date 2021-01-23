@@ -15,7 +15,7 @@ echo "ALLOCATED GPU: " $CUDA_VISIBLE_DEVICES
 
 run() {
     echo "===== Running $2 on $1 ====="
-    python tester.py --test_lang=$1 --model_path=./models/$2 --use_train_lr
+    python tester.py --test_lang=$1 --model_path=./models/$2
 }
 
 run_pos() {

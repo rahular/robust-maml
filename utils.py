@@ -143,6 +143,7 @@ def qa_evaluate(lang, test_set, model_type, loader, bert_model, learner, save_di
     output_prediction_file = os.path.join(save_dir, f"{lang}.predictions")
     output_nbest_file = os.path.join(save_dir, f"{lang}.nbest_predictions")
     features = [f for f in features if f.unique_id in uids]
+    qas_ids = list(dict.fromkeys([f.qas_id for f in features]))
     predictions = compute_predictions_logits(
         examples,
         features,
@@ -158,7 +159,7 @@ def qa_evaluate(lang, test_set, model_type, loader, bert_model, learner, save_di
         null_score_diff_threshold=-np.inf,
         tokenizer=AutoTokenizer.from_pretrained(model_type),
     )
-    results = squad_evaluate(test_set.get_by_ids(uids), predictions)
+    results = squad_evaluate(test_set.get_by_ids(qas_ids), predictions)
     return torch.tensor(loss), dict(results)
 
 
