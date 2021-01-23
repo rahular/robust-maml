@@ -402,6 +402,7 @@ class QA(data.Dataset):
             torch.save(
                 {"features": self.features, "dataset": self.dataset, "examples": self.examples}, cached_features_file
             )
+        self.id2ex = {e.qas_id: e for e in self.examples}
 
     def __len__(self):
         return len(self.features)
@@ -422,7 +423,12 @@ class QA(data.Dataset):
 
     def sample(self):
         return self.__getitem__(random.randint(0, len(self.features) - 1))
-
+    
+    def get_by_ids(self, ids):
+        subset = []
+        for idx in ids:
+            subset.append(self.id2ex[idx])
+        return subset
 
 def squad_convert_example_to_features_init(tokenizer_for_convert):
     transformers.data.processors.squad.tokenizer = tokenizer_for_convert

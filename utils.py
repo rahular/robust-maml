@@ -113,8 +113,10 @@ def compute_loss_metrics(
     return loss, metrics
 
 
-def qa_evaluate(lang, examples, features, model_type, loader, bert_model, learner, save_dir):
+def qa_evaluate(lang, test_set, model_type, loader, bert_model, learner, save_dir):
     all_results, loss, uids = [], [], []
+    examples = test_set.examples
+    features = test_set.features
     for batch in loader:
         with torch.no_grad():
             input_ids, attention_mask, token_type_ids, labels, unique_ids = (
@@ -156,7 +158,7 @@ def qa_evaluate(lang, examples, features, model_type, loader, bert_model, learne
         null_score_diff_threshold=-np.inf,
         tokenizer=AutoTokenizer.from_pretrained(model_type),
     )
-    results = squad_evaluate(examples, predictions)
+    results = squad_evaluate(test_set.get_by_ids(uids), predictions)
     return torch.tensor(loss), dict(results)
 
 

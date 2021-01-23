@@ -35,8 +35,7 @@ def zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config, args):
     else:
         loss, metrics = utils.qa_evaluate(
             args.test_lang,
-            test_set.examples,
-            test_set.features,
+            test_set,
             config.model_type,
             loader,
             bert_model,
@@ -49,7 +48,7 @@ def zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config, args):
 
 def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
     task = data_utils.CustomLangTaskDataset([test_set])
-    num_episodes = config.num_episodes
+    num_episodes = 100  # config.num_episodes
     task_bs = config.task_batch_size
     inner_loop_steps = config.inner_loop_steps
 
@@ -120,8 +119,7 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
         else:
             query_error, metrics = utils.qa_evaluate(
                 args.test_lang,
-                test_set.examples,
-                test_set.features,
+                test_set,
                 config.model_type,
                 query_loader,
                 encoder,
