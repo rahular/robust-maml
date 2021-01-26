@@ -16,7 +16,7 @@ import arguments
 import utils
 import tasks_sine
 from logger import Logger
-from maml_model import MamlModel, TaskSampler
+from maml_model import MamlModel, TaskSampler, Constrainer
 
 
 def run(args, log_interval=5000, rerun=False):
@@ -48,7 +48,9 @@ def run(args, log_interval=5000, rerun=False):
                             ).to(args.device)
     model_outer = copy.deepcopy(model_inner)
     if args.detector == "minimax":
-        task_sampler = TaskSampler(task_family_train.atoms // (2 if args.skew_task_distribution else 1))
+        task_sampler = TaskSampler(task_family_train.atoms // (2 if args.skew_task_distribution else 1)).to(args.device)
+    elif args.detector == "neyman-pearson":
+        constrainer = Constrainer(task_family_train.atoms // (2 if args.skew_task_distribution else 1)).to(args.device)
 
     # intitialise meta-optimiser
     meta_optimiser = optim.Adam(model_outer.weights + model_outer.biases,
@@ -65,11 +67,15 @@ def run(args, log_interval=5000, rerun=False):
         copy_biases = [b.clone() for b in model_outer.biases]
 
         # get all shared parameters and initialise cumulative gradient
-        meta_gradient = [0 for _ in range(len(copy_weights + copy_biases) + (2 if args.detector == "minimax" else 0))]
+        meta_gradient = [0 for _ in range(len(copy_weights + copy_biases) + (2 if args.detector != "bayes" else 0))]
 
         # sample tasks
         if args.detector == "minimax":
             task_idxs, task_probs = task_sampler(args.tasks_per_metaupdate)
+        elif args.detector == "neyman-pearson":
+            amplitude_idxs = torch.randint(task_family_train.atoms // (2 if args.skew_task_distribution else 1), (args.tasks_per_metaupdate,))
+            phase_idxs = torch.randint(task_family_train.atoms // (2 if args.skew_task_distribution else 1), (args.tasks_per_metaupdate,))
+            task_idxs = amplitude_idxs, phase_idxs
         else:
             task_idxs = None
 
@@ -129,13 +135,21 @@ def run(args, log_interval=5000, rerun=False):
                 importance = task_probs[t]
             else:
                 importance = 1. / args.tasks_per_metaupdate
-            loss_meta = F.mse_loss(test_outputs, test_targets) * importance
+            loss_meta_raw = F.mse_loss(test_outputs, test_targets)
+            loss_meta = loss_meta_raw * importance
+            if args.detector == "neyman-pearson":
+                amplitude_idxs, phase_idxs = task_idxs
+                aux_loss = constrainer(amplitude_idxs[t], phase_idxs[t], loss_meta_raw)
+                loss_meta = loss_meta + aux_loss
 
             # compute gradient w.r.t. *outer model*
             outer_params = model_outer.weights + model_outer.biases
             if args.detector == "minimax":
                 outer_params += [task_sampler.tau_amplitude, task_sampler.tau_phase]
-            task_grads = torch.autograd.grad(loss_meta, outer_params, retain_graph=(True if args.detector == "minimax" else False))
+            elif args.detector == "neyman-pearson":
+                outer_params += [constrainer.tau_amplitude, constrainer.tau_phase]
+
+            task_grads = torch.autograd.grad(loss_meta, outer_params, retain_graph=(args.detector != "bayes"))
             for i in range(len(outer_params)):
                 meta_gradient[i] += task_grads[i].detach()
 
@@ -154,6 +168,11 @@ def run(args, log_interval=5000, rerun=False):
         if args.detector == "minimax":
             task_sampler.tau_amplitude.grad = meta_gradient[i + j + 2]
             task_sampler.tau_phase.grad = meta_gradient[i + j + 3]
+            meta_gradient[i + j + 2] = 0
+            meta_gradient[i + j + 3] = 0
+        elif args.detector == "neyman-pearson":
+            constrainer.tau_amplitude.grad = meta_gradient[i + j + 2]
+            constrainer.tau_phase.grad = meta_gradient[i + j + 3]
             meta_gradient[i + j + 2] = 0
             meta_gradient[i + j + 3] = 0
 
