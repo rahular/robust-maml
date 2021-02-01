@@ -12,7 +12,7 @@ from torch.distributions.categorical import Categorical
 class Constrainer(nn.Module):
     def __init__(self,
                  n_tasks,
-                 threshold=0.1
+                 threshold=1.
                  ):
         """
         :param n_tasks:             the number of training tasks
@@ -20,12 +20,12 @@ class Constrainer(nn.Module):
         super(Constrainer, self).__init__()
         self.n_tasks = n_tasks
         self.threshold = threshold
-        self.tau_amplitude = nn.Parameter(torch.full((n_tasks, ), 1. / n_tasks))
-        self.tau_phase = nn.Parameter(torch.full((n_tasks, ), 1. / n_tasks))
+        self.tau_amplitude = nn.Parameter(torch.full((n_tasks, ), 1.))
+        self.tau_phase = nn.Parameter(torch.full((n_tasks, ), 1.))
         self.softplus = nn.Softplus()
 
     def forward(self, amplitude_idxs, phase_idxs, losses):
-        lambdas = self.softplus(self.tau_amplitude[amplitude_idxs] * self.tau_phase[phase_idxs])
+        lambdas = self.softplus(self.tau_amplitude[amplitude_idxs]) * self.softplus(self.tau_phase[phase_idxs])
         aux_loss = (losses - self.threshold) * lambdas
         return aux_loss
 

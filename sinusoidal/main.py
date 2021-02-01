@@ -166,13 +166,13 @@ def run(args, log_interval=5000, rerun=False):
             model_outer.biases[j].grad = meta_gradient[i + j + 1]
             meta_gradient[i + j + 1] = 0
         if args.detector == "minimax":
-            task_sampler.tau_amplitude.grad = meta_gradient[i + j + 2]
-            task_sampler.tau_phase.grad = meta_gradient[i + j + 3]
+            task_sampler.tau_amplitude.grad = - meta_gradient[i + j + 2]
+            task_sampler.tau_phase.grad = - meta_gradient[i + j + 3]
             meta_gradient[i + j + 2] = 0
             meta_gradient[i + j + 3] = 0
         elif args.detector == "neyman-pearson":
-            constrainer.tau_amplitude.grad = meta_gradient[i + j + 2]
-            constrainer.tau_phase.grad = meta_gradient[i + j + 3]
+            constrainer.tau_amplitude.grad = - meta_gradient[i + j + 2]
+            constrainer.tau_phase.grad = - meta_gradient[i + j + 3]
             meta_gradient[i + j + 2] = 0
             meta_gradient[i + j + 3] = 0
 
