@@ -11,12 +11,22 @@ fmt_row = "{0:>10} {1:>7.2f} {2:>7.2f} {3:>7.2f}"
 
 
 def init_args():
-    parser = argparse.ArgumentParser(description="Compile results of a model into a .csv file")
-    parser.add_argument(
-        "--model_path", dest="model_path", type=str, help="Path of the model folder", required=True,
+    parser = argparse.ArgumentParser(
+        description="Compile results of a model into a .csv file"
     )
     parser.add_argument(
-        "--model_path2", dest="model_path2", type=str, help="Path of the model folder for the 2nd partition", default="",
+        "--model_path",
+        dest="model_path",
+        type=str,
+        help="Path of the model folder",
+        required=True,
+    )
+    parser.add_argument(
+        "--model_path2",
+        dest="model_path2",
+        type=str,
+        help="Path of the model folder for the 2nd partition",
+        default="",
     )
     return parser.parse_args()
 
@@ -135,7 +145,11 @@ def for_qa(files, result_path):
 def main():
     args = init_args()
     result_path = os.path.join(args.model_path, "result")
-    files = [os.path.join(result_path, f) for f in os.listdir(result_path) if f.endswith("json")]
+    files = [
+        os.path.join(result_path, f)
+        for f in os.listdir(result_path)
+        if f.endswith("json")
+    ]
     with open(os.path.join(args.model_path, "config.json"), "r") as f:
         jfile = json.load(f)
         data_dir = jfile["data_dir"]
@@ -143,11 +157,17 @@ def main():
     if "tydiqa" in data_dir:
         assert args.model_path2
         result_path2 = os.path.join(args.model_path2, "result")
-        files += [os.path.join(result_path2, f) for f in os.listdir(result_path2) if f.endswith("json")]
+        files += [
+            os.path.join(result_path2, f)
+            for f in os.listdir(result_path2)
+            if f.endswith("json")
+        ]
         with open(os.path.join(args.model_path2, "config.json"), "r") as f:
             jfile = json.load(f)
             identifier2 = jfile["train_type"] + jfile.get("optim", "adam")
-            assert identifier == identifier2, "Mismatch between {} and {}".format(identifier, identifier2)
+            assert identifier == identifier2, "Mismatch between {} and {}".format(
+                identifier, identifier2
+            )
         for_qa(files, result_path)
     else:
         for_seq_lbl(files, result_path)

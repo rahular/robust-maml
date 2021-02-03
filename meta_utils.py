@@ -14,7 +14,12 @@ class ParamMetaSGD(BaseLearner):
         super(ParamMetaSGD, self).__init__()
         self.module = model
         if lrs is None:
-            lrs = nn.ParameterList([nn.Parameter(torch.Tensor([lr]).to(DEVICE)) for p in model.parameters()])
+            lrs = nn.ParameterList(
+                [
+                    nn.Parameter(torch.Tensor([lr]).to(DEVICE))
+                    for p in model.parameters()
+                ]
+            )
         self.lrs = lrs
         self.first_order = first_order
 
@@ -27,9 +32,11 @@ class ParamMetaSGD(BaseLearner):
         Akin to `MAML.clone()` but for MetaSGD: it includes a set of learnable fast-adaptation
         learning rates.
         """
-        return ParamMetaSGD(clone_module(self.module),
-                       lrs=clone_parameters(self.lrs),
-                       first_order=self.first_order)
+        return ParamMetaSGD(
+            clone_module(self.module),
+            lrs=clone_parameters(self.lrs),
+            first_order=self.first_order,
+        )
 
     def adapt(self, loss, first_order=None, retain_graph=False, allow_unused=False):
         """
@@ -40,9 +47,11 @@ class ParamMetaSGD(BaseLearner):
         if first_order is None:
             first_order = self.first_order
         second_order = not first_order
-        gradients = grad(loss,
-                         self.module.parameters(),
-                         retain_graph=second_order or retain_graph,
-                         create_graph=second_order,
-                         allow_unused=allow_unused)
+        gradients = grad(
+            loss,
+            self.module.parameters(),
+            retain_graph=second_order or retain_graph,
+            create_graph=second_order,
+            allow_unused=allow_unused,
+        )
         self.module = meta_sgd_update(self.module, self.lrs, gradients)

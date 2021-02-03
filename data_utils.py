@@ -22,11 +22,16 @@ from torch.nn import functional as F
 from torch.distributions.categorical import Categorical
 from torch.utils import data
 from transformers import AutoTokenizer
-from transformers.data.processors.squad import squad_convert_example_to_features, SquadExample
+from transformers.data.processors.squad import (
+    squad_convert_example_to_features,
+    SquadExample,
+)
 from learn2learn.data import MetaDataset, TaskDataset
 
 logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
+    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+    datefmt="%m/%d/%Y %H:%M:%S",
+    level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -58,7 +63,7 @@ class InnerDataset(data.Dataset):
             self.attention_mask[idx],
             self.token_type_ids[idx],
             self.label_ids[idx],
-            self.unique_ids[idx]
+            self.unique_ids[idx],
         )
 
 
@@ -69,11 +74,18 @@ class CustomLangTaskDataset(nn.Module):
             self.datasets = {d.dataset.lang: d for d in datasets}
         else:
             self.datasets = {d.lang: d for d in datasets}
-        self.id2lang = {idx: lang for idx, lang in enumerate(sorted(self.datasets.keys()))}
+        self.id2lang = {
+            idx: lang for idx, lang in enumerate(sorted(self.datasets.keys()))
+        }
         self.lang2id = {lang: idx for idx, lang in self.id2lang.items()}
         total_langs = len(self.datasets)
         self.tau = nn.Parameter(
-            torch.ones(total_langs, dtype=torch.float32, requires_grad=(train_type != "metabase"), device=DEVICE)
+            torch.ones(
+                total_langs,
+                dtype=torch.float32,
+                requires_grad=(train_type != "metabase"),
+                device=DEVICE,
+            )
             / total_langs
         )
         self.activation = lambda x: x  # pass-through activation
@@ -113,7 +125,13 @@ class CustomLangTaskDataset(nn.Module):
                 lang_idx.append(self.lang2id[lang])
             lang_idx = torch.tensor(lang_idx)
 
-        X = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "label_ids": [], "unique_ids": []}
+        X = {
+            "input_ids": [],
+            "attention_mask": [],
+            "token_type_ids": [],
+            "label_ids": [],
+            "unique_ids": [],
+        }
         Y = []
         for lang in langs:
             if isinstance(self.datasets[lang], data.Subset):
@@ -130,8 +148,20 @@ class CustomLangTaskDataset(nn.Module):
         # this is used only during testing, so there should only be one language
         assert len(self.datasets) == 1
         dataset = list(self.datasets.values())[0]
-        support_X = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "label_ids": [], "unique_ids": []}
-        query_X = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "label_ids": [], "unique_ids": []}
+        support_X = {
+            "input_ids": [],
+            "attention_mask": [],
+            "token_type_ids": [],
+            "label_ids": [],
+            "unique_ids": [],
+        }
+        query_X = {
+            "input_ids": [],
+            "attention_mask": [],
+            "token_type_ids": [],
+            "label_ids": [],
+            "unique_ids": [],
+        }
         ids = list(range(len(dataset)))
         random.shuffle(ids)
         support_ids, query_ids = ids[:k], ids[k:]
@@ -177,67 +207,9 @@ class POS(data.Dataset):
                     break
             label_map = {l: idx for idx, l in enumerate(get_pos_labels())}
             tokenizer = AutoTokenizer.from_pretrained(model_type)
-            self.features = convert_examples_to_features(sents, labels, label_map, max_seq_len, tokenizer)
-            torch.save(self.features, cached_features_file)
-
-    def __len__(self):
-        return len(self.features)
-
-    def __getitem__(self, idx):
-        return (
-            {
-                "input_ids": self.features[idx].input_ids,
-                "attention_mask": self.features[idx].attention_mask,
-                "token_type_ids": self.features[idx].token_type_ids,
-                "label_ids": self.features[idx].label_ids,
-                "unique_id": self.features[idx].unique_id,
-            },
-            self.lang,
-        )
-
-    def sample(self):
-        return self.__getitem__(random.randint(0, len(self.features) - 1))
-
-
-class NER(data.Dataset):
-    def __init__(self, path, max_seq_len, model_type, max_count=10 ** 6):
-        # path should always be of the form <lang>.<split>
-        self.lang = path.split("/")[-1].split(".")[0]
-        sents, labels = [], []
-        words, tags = [], []
-        cached_features_file = path + f".{max_count}.th"
-        if os.path.exists(cached_features_file):
-            logger.info(f"Loading features from cached file {cached_features_file}")
-            self.features = torch.load(cached_features_file)
-        else:
-            logger.info(f"Saving features into cached file {cached_features_file}")
-            with open(path, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        assert len(words) == len(tags)
-                        for idx in range(0, len(tags), max_seq_len):
-                            sents.append(words[idx : idx + max_seq_len])
-                            labels.append(tags[idx : idx + max_seq_len])
-                        words, tags = [], []
-                        # we don't count and break here, because the first k examples are not necessarily
-                        # the best as they may come only from a handful of wiki docs.
-                    else:
-                        parts = line.split()
-                        words.append(parts[0])
-                        tags.append(parts[-1])
-                if len(words) > 0:
-                    assert len(words) == len(tags)
-                    for idx in range(0, len(tags), max_seq_len):
-                        sents.append(words[idx : idx + max_seq_len])
-                        labels.append(tags[idx : idx + max_seq_len])
-            concat_list = list(zip(sents, labels))
-            random.shuffle(concat_list)
-            sents, labels = zip(*concat_list)
-            sents, labels = list(sents[:max_count]), list(labels[:max_count])
-            label_map = {l: idx for idx, l in enumerate(get_ner_labels())}
-            tokenizer = AutoTokenizer.from_pretrained(model_type)
-            self.features = convert_examples_to_features(sents, labels, label_map, max_seq_len, tokenizer)
+            self.features = convert_examples_to_features(
+                sents, labels, label_map, max_seq_len, tokenizer
+            )
             torch.save(self.features, cached_features_file)
 
     def __len__(self):
@@ -292,7 +264,9 @@ def convert_examples_to_features(
 
             if len(word_tokens) > 0:
                 tokens.extend(word_tokens)
-                label_ids.extend([label_map[label]] + [pad_token_label_id] * (len(word_tokens) - 1))
+                label_ids.extend(
+                    [label_map[label]] + [pad_token_label_id] * (len(word_tokens) - 1)
+                )
 
         # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
         special_tokens_count = tokenizer.num_special_tokens_to_add()
@@ -322,7 +296,9 @@ def convert_examples_to_features(
         padding_length = max_seq_len - len(input_ids)
         if pad_on_left:
             input_ids = ([pad_token] * padding_length) + input_ids
-            input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
+            input_mask = (
+                [0 if mask_padding_with_zero else 1] * padding_length
+            ) + input_mask
             segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
             label_ids = ([pad_token_label_id] * padding_length) + label_ids
         else:
@@ -341,7 +317,11 @@ def convert_examples_to_features(
 
         features.append(
             InputFeatures(
-                unique_id=idx, input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids, label_ids=label_ids
+                unique_id=idx,
+                input_ids=input_ids,
+                attention_mask=input_mask,
+                token_type_ids=segment_ids,
+                label_ids=label_ids,
             )
         )
 
@@ -370,10 +350,6 @@ def get_pos_labels():
     ]
 
 
-def get_ner_labels():
-    return ["B-LOC", "B-ORG", "B-PER", "I-LOC", "I-ORG", "I-PER", "O"]
-
-
 ##################### QA data utils #####################
 class QA(data.Dataset):
     def __init__(self, path, max_clen, max_qlen, doc_stride, model_type):
@@ -400,7 +376,12 @@ class QA(data.Dataset):
                 max_query_length=max_qlen,
             )
             torch.save(
-                {"features": self.features, "dataset": self.dataset, "examples": self.examples}, cached_features_file
+                {
+                    "features": self.features,
+                    "dataset": self.dataset,
+                    "examples": self.examples,
+                },
+                cached_features_file,
             )
         self.id2ex = {e.qas_id: e for e in self.examples}
 
@@ -415,20 +396,24 @@ class QA(data.Dataset):
                 "input_ids": self.features[idx].input_ids,
                 "attention_mask": self.features[idx].attention_mask,
                 "token_type_ids": self.features[idx].token_type_ids,
-                "label_ids": (self.features[idx].start_position, self.features[idx].end_position),
-                "unique_id": self.features[idx].unique_id
+                "label_ids": (
+                    self.features[idx].start_position,
+                    self.features[idx].end_position,
+                ),
+                "unique_id": self.features[idx].unique_id,
             },
             self.lang,
         )
 
     def sample(self):
         return self.__getitem__(random.randint(0, len(self.features) - 1))
-    
+
     def get_by_ids(self, ids):
         subset = []
         for idx in ids:
             subset.append(self.id2ex[idx])
         return subset
+
 
 def squad_convert_example_to_features_init(tokenizer_for_convert):
     transformers.data.processors.squad.tokenizer = tokenizer_for_convert
@@ -448,7 +433,11 @@ def squad_convert_examples_to_features(
     features = []
 
     threads = min(threads, cpu_count())
-    with Pool(threads, initializer=squad_convert_example_to_features_init, initargs=(tokenizer,)) as p:
+    with Pool(
+        threads,
+        initializer=squad_convert_example_to_features_init,
+        initargs=(tokenizer,),
+    ) as p:
         annotate_ = partial(
             squad_convert_example_to_features,
             max_seq_length=max_seq_length,
@@ -470,7 +459,10 @@ def squad_convert_examples_to_features(
     unique_id = 1000000000
     example_index = 0
     for example_features in tqdm(
-        features, total=len(features), desc="add example index and unique id", disable=not tqdm_enabled
+        features,
+        total=len(features),
+        desc="add example index and unique id",
+        disable=not tqdm_enabled,
     ):
         if not example_features:
             continue
@@ -484,14 +476,24 @@ def squad_convert_examples_to_features(
     del new_features
 
     all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
-    all_attention_masks = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
-    all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
+    all_attention_masks = torch.tensor(
+        [f.attention_mask for f in features], dtype=torch.long
+    )
+    all_token_type_ids = torch.tensor(
+        [f.token_type_ids for f in features], dtype=torch.long
+    )
     all_cls_index = torch.tensor([f.cls_index for f in features], dtype=torch.long)
     all_p_mask = torch.tensor([f.p_mask for f in features], dtype=torch.float)
-    all_is_impossible = torch.tensor([f.is_impossible for f in features], dtype=torch.float)
+    all_is_impossible = torch.tensor(
+        [f.is_impossible for f in features], dtype=torch.float
+    )
     all_feature_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
-    all_start_positions = torch.tensor([f.start_position for f in features], dtype=torch.long)
-    all_end_positions = torch.tensor([f.end_position for f in features], dtype=torch.long)
+    all_start_positions = torch.tensor(
+        [f.start_position for f in features], dtype=torch.long
+    )
+    all_end_positions = torch.tensor(
+        [f.end_position for f in features], dtype=torch.long
+    )
     dataset = data.TensorDataset(
         all_input_ids,
         all_attention_masks,

@@ -9,7 +9,9 @@ import torch
 
 import seaborn as sns
 import matplotlib.pyplot as plt
+
 sns.set(style="ticks", font="Times New Roman")
+
 
 def set_seed(seed, cudnn=True):
     """
@@ -28,12 +30,12 @@ def set_seed(seed, cudnn=True):
 
 
 def save_obj(obj, name):
-    with open(name + '.pkl', 'wb') as f:
+    with open(name + ".pkl", "wb") as f:
         pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
 
 
 def load_obj(name):
-    with open(name + '.pkl', 'rb') as f:
+    with open(name + ".pkl", "rb") as f:
         return pickle.load(f)
 
 
@@ -48,13 +50,20 @@ def get_base_path():
     p = os.path.dirname(os.path.realpath(__file__))
     if os.path.exists(p):
         return p
-    raise RuntimeError('I dont know where I am; please specify a path for saving results.')
+    raise RuntimeError(
+        "I dont know where I am; please specify a path for saving results."
+    )
 
 
 def get_stats(losses):
     loss_mean = np.mean(losses)
     loss_std = st.sem(losses)
-    loss_conf = np.mean(np.abs(st.t.interval(0.95, losses.size - 1, loc=loss_mean, scale=loss_std) - loss_mean))
+    loss_conf = np.mean(
+        np.abs(
+            st.t.interval(0.95, losses.size - 1, loc=loss_mean, scale=loss_std)
+            - loss_mean
+        )
+    )
     return loss_mean, loss_conf
 
 
@@ -62,6 +71,8 @@ def plot_df(df, path):
     df.dropna()
     plot = sns.lineplot(data=df, x="grad_steps", y="loss", hue="k_shot", style="k_shot")
     sns.despine()
-    plot.set(xlabel='Gradient Steps', ylabel='Mean Squared Error')
-    plt.legend(title='K')
-    plot.figure.savefig(os.path.join(path, "plot.pdf"), bbox_inches='tight', pad_inches=0)
+    plot.set(xlabel="Gradient Steps", ylabel="Mean Squared Error")
+    plt.legend(title="K")
+    plot.figure.savefig(
+        os.path.join(path, "plot.pdf"), bbox_inches="tight", pad_inches=0
+    )

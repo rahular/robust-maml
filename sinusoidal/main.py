@@ -24,12 +24,12 @@ def run(args, log_interval=5000, rerun=False):
     # see if we already ran this experiment
     code_root = os.path.dirname(os.path.realpath(__file__))
     exp_dir = utils.get_path_from_args(args) if not args.output_dir else args.output_dir
-    path = '{}/results/{}'.format(code_root, exp_dir)
+    path = "{}/results/{}".format(code_root, exp_dir)
     if not os.path.isdir(path):
         os.makedirs(path)
 
-    if os.path.exists(os.path.join(path, 'logs.pkl')) and not rerun:
-        return utils.load_obj(os.path.join(path, 'logs'))
+    if os.path.exists(os.path.join(path, "logs.pkl")) and not rerun:
+        return utils.load_obj(os.path.join(path, "logs"))
 
     start_time = time.time()
 
@@ -37,24 +37,32 @@ def run(args, log_interval=5000, rerun=False):
     utils.set_seed(args.seed)
 
     # --- initialise everything ---
-    task_family_train = tasks_sine.RegressionTasksSinusoidal('train', args.skew_task_distribution)
-    task_family_valid = tasks_sine.RegressionTasksSinusoidal('valid', args.skew_task_distribution)
+    task_family_train = tasks_sine.RegressionTasksSinusoidal(
+        "train", args.skew_task_distribution
+    )
+    task_family_valid = tasks_sine.RegressionTasksSinusoidal(
+        "valid", args.skew_task_distribution
+    )
 
     # initialise network
-    model_inner = MamlModel(task_family_train.num_inputs,
-                            task_family_train.num_outputs,
-                            n_weights=args.num_hidden_layers,
-                            device=args.device
-                            ).to(args.device)
+    model_inner = MamlModel(
+        task_family_train.num_inputs,
+        task_family_train.num_outputs,
+        n_weights=args.num_hidden_layers,
+        device=args.device,
+    ).to(args.device)
     model_outer = copy.deepcopy(model_inner)
     if args.detector == "minimax":
-        task_sampler = TaskSampler(task_family_train.atoms // (2 if args.skew_task_distribution else 1)).to(args.device)
+        task_sampler = TaskSampler(
+            task_family_train.atoms // (2 if args.skew_task_distribution else 1)
+        ).to(args.device)
     elif args.detector == "neyman-pearson":
-        constrainer = Constrainer(task_family_train.atoms // (2 if args.skew_task_distribution else 1)).to(args.device)
+        constrainer = Constrainer(
+            task_family_train.atoms // (2 if args.skew_task_distribution else 1)
+        ).to(args.device)
 
     # intitialise meta-optimiser
-    meta_optimiser = optim.Adam(model_outer.weights + model_outer.biases,
-                                args.lr_meta)
+    meta_optimiser = optim.Adam(model_outer.weights + model_outer.biases, args.lr_meta)
 
     # initialise loggers
     logger = Logger()
@@ -67,19 +75,32 @@ def run(args, log_interval=5000, rerun=False):
         copy_biases = [b.clone() for b in model_outer.biases]
 
         # get all shared parameters and initialise cumulative gradient
-        meta_gradient = [0 for _ in range(len(copy_weights + copy_biases) + (2 if args.detector != "bayes" else 0))]
+        meta_gradient = [
+            0
+            for _ in range(
+                len(copy_weights + copy_biases) + (2 if args.detector != "bayes" else 0)
+            )
+        ]
 
         # sample tasks
         if args.detector == "minimax":
             task_idxs, task_probs = task_sampler(args.tasks_per_metaupdate)
         elif args.detector == "neyman-pearson":
-            amplitude_idxs = torch.randint(task_family_train.atoms // (2 if args.skew_task_distribution else 1), (args.tasks_per_metaupdate,))
-            phase_idxs = torch.randint(task_family_train.atoms // (2 if args.skew_task_distribution else 1), (args.tasks_per_metaupdate,))
+            amplitude_idxs = torch.randint(
+                task_family_train.atoms // (2 if args.skew_task_distribution else 1),
+                (args.tasks_per_metaupdate,),
+            )
+            phase_idxs = torch.randint(
+                task_family_train.atoms // (2 if args.skew_task_distribution else 1),
+                (args.tasks_per_metaupdate,),
+            )
             task_idxs = amplitude_idxs, phase_idxs
         else:
             task_idxs = None
 
-        target_functions = task_family_train.sample_tasks(args.tasks_per_metaupdate, task_idxs=task_idxs)
+        target_functions = task_family_train.sample_tasks(
+            args.tasks_per_metaupdate, task_idxs=task_idxs
+        )
 
         for t in range(args.tasks_per_metaupdate):
 
@@ -88,7 +109,9 @@ def run(args, log_interval=5000, rerun=False):
             model_inner.biases = [b.clone() for b in copy_biases]
 
             # get data for current task
-            train_inputs = task_family_train.sample_inputs(args.k_meta_train).to(args.device)
+            train_inputs = task_family_train.sample_inputs(args.k_meta_train).to(
+                args.device
+            )
 
             for _ in range(args.num_inner_updates):
 
@@ -104,25 +127,40 @@ def run(args, log_interval=5000, rerun=False):
                 loss_task = F.mse_loss(outputs, targets)
 
                 # compute the gradient wrt current model
-                params = [w for w in model_inner.weights] + [b for b in model_inner.biases]
-                grads = torch.autograd.grad(loss_task, params, create_graph=True, retain_graph=True)
+                params = [w for w in model_inner.weights] + [
+                    b for b in model_inner.biases
+                ]
+                grads = torch.autograd.grad(
+                    loss_task, params, create_graph=True, retain_graph=True
+                )
 
                 # make an update on the inner model using the current model (to build up computation graph)
                 for i in range(len(model_inner.weights)):
                     if not args.first_order:
-                        model_inner.weights[i] = model_inner.weights[i] - args.lr_inner * grads[i]
+                        model_inner.weights[i] = (
+                            model_inner.weights[i] - args.lr_inner * grads[i]
+                        )
                     else:
-                        model_inner.weights[i] = model_inner.weights[i] - args.lr_inner * grads[i].detach()
+                        model_inner.weights[i] = (
+                            model_inner.weights[i] - args.lr_inner * grads[i].detach()
+                        )
                 for j in range(len(model_inner.biases)):
                     if not args.first_order:
-                        model_inner.biases[j] = model_inner.biases[j] - args.lr_inner * grads[i + j + 1]
+                        model_inner.biases[j] = (
+                            model_inner.biases[j] - args.lr_inner * grads[i + j + 1]
+                        )
                     else:
-                        model_inner.biases[j] = model_inner.biases[j] - args.lr_inner * grads[i + j + 1].detach()
+                        model_inner.biases[j] = (
+                            model_inner.biases[j]
+                            - args.lr_inner * grads[i + j + 1].detach()
+                        )
 
             # ------------ compute meta-gradient on test loss of current task ------------
 
             # get test data
-            test_inputs = task_family_train.sample_inputs(args.k_meta_test).to(args.device)
+            test_inputs = task_family_train.sample_inputs(args.k_meta_test).to(
+                args.device
+            )
 
             # get outputs after update
             test_outputs = model_inner(test_inputs)
@@ -134,7 +172,7 @@ def run(args, log_interval=5000, rerun=False):
             if args.detector == "minimax":
                 importance = task_probs[t]
             else:
-                importance = 1. / args.tasks_per_metaupdate
+                importance = 1.0 / args.tasks_per_metaupdate
             loss_meta_raw = F.mse_loss(test_outputs, test_targets)
             loss_meta = loss_meta_raw * importance
             if args.detector == "neyman-pearson":
@@ -149,7 +187,9 @@ def run(args, log_interval=5000, rerun=False):
             elif args.detector == "neyman-pearson":
                 outer_params += [constrainer.tau_amplitude, constrainer.tau_phase]
 
-            task_grads = torch.autograd.grad(loss_meta, outer_params, retain_graph=(args.detector != "bayes"))
+            task_grads = torch.autograd.grad(
+                loss_meta, outer_params, retain_graph=(args.detector != "bayes")
+            )
             for i in range(len(outer_params)):
                 meta_gradient[i] += task_grads[i].detach()
 
@@ -166,13 +206,13 @@ def run(args, log_interval=5000, rerun=False):
             model_outer.biases[j].grad = meta_gradient[i + j + 1]
             meta_gradient[i + j + 1] = 0
         if args.detector == "minimax":
-            task_sampler.tau_amplitude.grad = - meta_gradient[i + j + 2]
-            task_sampler.tau_phase.grad = - meta_gradient[i + j + 3]
+            task_sampler.tau_amplitude.grad = -meta_gradient[i + j + 2]
+            task_sampler.tau_phase.grad = -meta_gradient[i + j + 3]
             meta_gradient[i + j + 2] = 0
             meta_gradient[i + j + 3] = 0
         elif args.detector == "neyman-pearson":
-            constrainer.tau_amplitude.grad = - meta_gradient[i + j + 2]
-            constrainer.tau_phase.grad = - meta_gradient[i + j + 3]
+            constrainer.tau_amplitude.grad = -meta_gradient[i + j + 2]
+            constrainer.tau_phase.grad = -meta_gradient[i + j + 3]
             meta_gradient[i + j + 2] = 0
             meta_gradient[i + j + 3] = 0
 
@@ -184,26 +224,34 @@ def run(args, log_interval=5000, rerun=False):
         if i_iter % log_interval == 0:
 
             # evaluate on training set
-            losses = eval(args, copy.copy(model_outer), task_family=task_family_train,
-                                        num_updates=args.num_inner_updates)
+            losses = eval(
+                args,
+                copy.copy(model_outer),
+                task_family=task_family_train,
+                num_updates=args.num_inner_updates,
+            )
             loss_mean, loss_conf = utils.get_stats(np.array(losses))
             logger.train_loss.append(loss_mean)
             logger.train_conf.append(loss_conf)
 
             # evaluate on valid set
-            losses = eval(args, copy.copy(model_outer), task_family=task_family_valid,
-                                        num_updates=args.num_inner_updates)
+            losses = eval(
+                args,
+                copy.copy(model_outer),
+                task_family=task_family_valid,
+                num_updates=args.num_inner_updates,
+            )
             loss_mean, loss_conf = utils.get_stats(np.array(losses))
             logger.valid_loss.append(loss_mean)
             logger.valid_conf.append(loss_conf)
 
             # save best model
             if logger.valid_loss[-1] == np.min(logger.valid_loss):
-                print('saving best model at iter', i_iter)
+                print("saving best model at iter", i_iter)
                 logger.best_valid_model = copy.copy(model_outer)
 
             # save logging results
-            utils.save_obj(logger, os.path.join(path, 'logs'))
+            utils.save_obj(logger, os.path.join(path, "logs"))
 
             # print current results
             logger.print_info(i_iter, start_time)
@@ -212,7 +260,9 @@ def run(args, log_interval=5000, rerun=False):
     return logger
 
 
-def eval(args, model, task_family, num_updates, n_tasks=100, lr_inner=None, k_shot=None):
+def eval(
+    args, model, task_family, num_updates, n_tasks=100, lr_inner=None, k_shot=None
+):
     if lr_inner is None:
         lr_inner = args.lr_inner
     if k_shot is None:
@@ -262,7 +312,11 @@ def eval(args, model, task_family, num_updates, n_tasks=100, lr_inner=None, k_sh
                 model.biases[j] = model.biases[j] - lr_inner * grads[i + j + 1].detach()
 
             # compute true loss on entire input range
-            losses[t].append(F.mse_loss(model(input_range), target_function(input_range)).detach().item())
+            losses[t].append(
+                F.mse_loss(model(input_range), target_function(input_range))
+                .detach()
+                .item()
+            )
 
     # reset network weights
     model.weights = [w.clone() for w in copy_weights]
@@ -270,25 +324,37 @@ def eval(args, model, task_family, num_updates, n_tasks=100, lr_inner=None, k_sh
 
     return losses
 
+
 def test(args):
     # see if we already ran this experiment
     code_root = os.path.dirname(os.path.realpath(__file__))
     exp_dir = utils.get_path_from_args(args) if not args.output_dir else args.output_dir
-    path = '{}/results/{}'.format(code_root, exp_dir)
+    path = "{}/results/{}".format(code_root, exp_dir)
     assert os.path.isdir(path)
-    task_family_test = tasks_sine.RegressionTasksSinusoidal('test', args.skew_task_distribution)
-    best_valid_model = utils.load_obj(os.path.join(path, 'logs')).best_valid_model
+    task_family_test = tasks_sine.RegressionTasksSinusoidal(
+        "test", args.skew_task_distribution
+    )
+    best_valid_model = utils.load_obj(os.path.join(path, "logs")).best_valid_model
     k_shots = [5, 10, 20, 40]
     df = []
     for k_shot in k_shots:
-        losses = np.array(eval(args, copy.copy(best_valid_model), task_family=task_family_test,
-                          num_updates=10, lr_inner=0.01, n_tasks=1000, k_shot=k_shot))
+        losses = np.array(
+            eval(
+                args,
+                copy.copy(best_valid_model),
+                task_family=task_family_test,
+                num_updates=10,
+                lr_inner=0.01,
+                n_tasks=1000,
+                k_shot=k_shot,
+            )
+        )
         for grad_step, task_losses in enumerate(losses.T, 1):
             new_rows = [[k_shot, grad_step, tl] for tl in task_losses]
             df.extend(new_rows)
 
-    df = pd.DataFrame(df, columns=['k_shot', 'grad_steps', 'loss'])
-    df.to_pickle(os.path.join(path, 'res.pkl'))
+    df = pd.DataFrame(df, columns=["k_shot", "grad_steps", "loss"])
+    df.to_pickle(os.path.join(path, "res.pkl"))
     utils.plot_df(df, path)
 
 

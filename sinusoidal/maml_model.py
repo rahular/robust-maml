@@ -10,55 +10,54 @@ from torch.distributions.categorical import Categorical
 
 
 class Constrainer(nn.Module):
-    def __init__(self,
-                 n_tasks,
-                 threshold=1.
-                 ):
+    def __init__(self, n_tasks, threshold=1.0):
         """
         :param n_tasks:             the number of training tasks
         """
         super(Constrainer, self).__init__()
         self.n_tasks = n_tasks
         self.threshold = threshold
-        self.tau_amplitude = nn.Parameter(torch.full((n_tasks, ), 1.))
-        self.tau_phase = nn.Parameter(torch.full((n_tasks, ), 1.))
+        self.tau_amplitude = nn.Parameter(torch.full((n_tasks,), 1.0))
+        self.tau_phase = nn.Parameter(torch.full((n_tasks,), 1.0))
         self.softplus = nn.Softplus()
 
     def forward(self, amplitude_idxs, phase_idxs, losses):
-        lambdas = self.softplus(self.tau_amplitude[amplitude_idxs]) * self.softplus(self.tau_phase[phase_idxs])
+        lambdas = self.softplus(self.tau_amplitude[amplitude_idxs]) * self.softplus(
+            self.tau_phase[phase_idxs]
+        )
         aux_loss = (losses - self.threshold) * lambdas
         return aux_loss
 
 
 class TaskSampler(nn.Module):
-    def __init__(self,
-                 n_tasks,
-                 ):
+    def __init__(
+        self, n_tasks,
+    ):
         """
         :param n_tasks:             the number of training tasks
         """
         super(TaskSampler, self).__init__()
         self.n_tasks = n_tasks
-        self.tau_amplitude = nn.Parameter(torch.full((n_tasks, ), 1. / n_tasks))
-        self.tau_phase = nn.Parameter(torch.full((n_tasks, ), 1. / n_tasks))
+        self.tau_amplitude = nn.Parameter(torch.full((n_tasks,), 1.0 / n_tasks))
+        self.tau_phase = nn.Parameter(torch.full((n_tasks,), 1.0 / n_tasks))
         self.softmax = nn.Softmax(dim=0)
 
     def forward(self, n_tasks):
         amplitude_distribution = Categorical(logits=self.tau_amplitude)
         phase_distribution = Categorical(logits=self.tau_phase)
-        amplitude_idxs = amplitude_distribution.sample(sample_shape=(n_tasks, ))
-        phase_idxs = phase_distribution.sample(sample_shape=(n_tasks, ))
-        task_probs = self.softmax(self.tau_amplitude)[amplitude_idxs] * self.softmax(self.tau_phase)[phase_idxs]
+        amplitude_idxs = amplitude_distribution.sample(sample_shape=(n_tasks,))
+        phase_idxs = phase_distribution.sample(sample_shape=(n_tasks,))
+        task_probs = (
+            self.softmax(self.tau_amplitude)[amplitude_idxs]
+            * self.softmax(self.tau_phase)[phase_idxs]
+        )
         return (amplitude_idxs, phase_idxs), task_probs
 
 
 class MamlModel(nn.Module):
-    def __init__(self,
-                 n_inputs,
-                 n_outputs,
-                 n_weights,
-                 device,
-                 ):
+    def __init__(
+        self, n_inputs, n_outputs, n_weights, device,
+    ):
         """
         :param n_inputs:            the number of inputs to the network
         :param n_outputs:           the number of outputs of the network
@@ -88,7 +87,7 @@ class MamlModel(nn.Module):
 
     def _reset_parameters(self):
         for i in range(len(self.nodes_per_layer)):
-            stdv = 1. / math.sqrt(self.nodes_per_layer[i])
+            stdv = 1.0 / math.sqrt(self.nodes_per_layer[i])
             self.weights[i].data.uniform_(-stdv, stdv)
             self.biases[i].data.uniform_(-stdv, stdv)
 
