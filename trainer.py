@@ -243,7 +243,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                     logger.info("Found new best model!")
                     best_dev_error = eval_error
                     save(meta_clf, opt, args.config_path, iteration, meta_encoder if config.finetune_enc else None)
-                    save_dist("best_minmax_dist.npy")
+                    save_dist("best_dist.npy")
                     patience_ctr = 0
                 else:
                     patience_ctr += 1
@@ -255,7 +255,7 @@ def meta_train(args, config, train_set, dev_set, label_map, bert_model, clf_head
                 train_iteration_error = 0.
 
         if config.train_type != "metabase" and iteration % 10 == 0:
-            save_dist("minmax_dist.npy")
+            save_dist("dist.npy")
         if patience_over:
             break
 
