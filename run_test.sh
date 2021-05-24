@@ -1,14 +1,5 @@
 #!/bin/bash
 
-#SBATCH --job-name=test
-#SBATCH --ntasks=1
-#SBATCH --output=logs/test.out
-#SBATCH --cpus-per-task=1
-#SBATCH --time=02:00:00
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:titanrtx
-#SBATCH --mem=60GB
-
 source activate pos-bert
 echo "HOSTNAME: " `hostname`
 echo "ALLOCATED GPU: " $CUDA_VISIBLE_DEVICES
@@ -38,15 +29,15 @@ run_pos() {
 }
 
 run_qa() {
-    # run "finnish" $1
-    # run "korean" $1
+    run "finnish" $1
+    run "korean" $1
     run "russian" $1
     run "indonesian" $1
     run "telugu" $1
-    # run "bengali" $1
+    run "bengali" $1
     run "swahili" $1
-    # run "english" $1
-    # run "arabic" $1
+    run "english" $1
+    run "arabic" $1
 }
 
 run_pos $1
