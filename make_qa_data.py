@@ -70,7 +70,15 @@ def count(data):
             qs += len(p["qas"])
             for qa in p["qas"]:
                 qlens.append(len(qa["question"]))
-    return qs, np.mean(clens), np.std(clens), np.max(clens), np.mean(qlens), np.std(qlens), np.max(qlens)
+    return (
+        qs,
+        np.mean(clens),
+        np.std(clens),
+        np.max(clens),
+        np.mean(qlens),
+        np.std(qlens),
+        np.max(qlens),
+    )
 
 
 def clean_and_normalize(dp):
@@ -96,11 +104,25 @@ def normalize(dp):
 
 
 def print_stats():
-    train_paths = [os.path.join(save_dir, fname) for fname in os.listdir(save_dir) if fname.endswith(".train")]
-    dev_paths = [os.path.join(save_dir, fname) for fname in os.listdir(save_dir) if fname.endswith(".dev")]
-    test_paths = [os.path.join(save_dir, fname) for fname in os.listdir(save_dir) if fname.endswith(".test")]
+    train_paths = [
+        os.path.join(save_dir, fname)
+        for fname in os.listdir(save_dir)
+        if fname.endswith(".train")
+    ]
+    dev_paths = [
+        os.path.join(save_dir, fname)
+        for fname in os.listdir(save_dir)
+        if fname.endswith(".dev")
+    ]
+    test_paths = [
+        os.path.join(save_dir, fname)
+        for fname in os.listdir(save_dir)
+        if fname.endswith(".test")
+    ]
 
-    fmt_str = "{0:>10}: {1:>7.0f} {2:>7.2f} {3:>7.2f} {4:>7.0f} {5:>7.2f} {6:>7.2f} {7:>7.0f}"
+    fmt_str = (
+        "{0:>10}: {1:>7.0f} {2:>7.2f} {3:>7.2f} {4:>7.0f} {5:>7.2f} {6:>7.2f} {7:>7.0f}"
+    )
 
     def loop(paths):
         for fpath in paths:
@@ -127,7 +149,16 @@ def main():
         data = json.load(f)
         version = data["version"]
         data = data["data"]
-    langs = ["arabic", "bengali", "finnish", "indonesian", "swahili", "korean", "russian", "telugu"]
+    langs = [
+        "arabic",
+        "bengali",
+        "finnish",
+        "indonesian",
+        "swahili",
+        "korean",
+        "russian",
+        "telugu",
+    ]
     random.shuffle(langs)
     train_langs, test_langs = langs[:4], langs[4:]
     train_langs += ["english"]
@@ -138,7 +169,11 @@ def main():
     for dp in data:
         lang = dp["paragraphs"][0]["qas"][0]["id"].split("-")[0]
         if lang not in langs + ["english"]:
-            raise ValueError("Datapoint does not have a valid id: {}".format(dp["paragraphs"][0]["qas"][0]["id"]))
+            raise ValueError(
+                "Datapoint does not have a valid id: {}".format(
+                    dp["paragraphs"][0]["qas"][0]["id"]
+                )
+            )
         elif lang in ["russian", "korean"]:
             datasets[lang].append(clean_and_normalize(dp))
         else:

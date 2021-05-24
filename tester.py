@@ -20,18 +20,27 @@ from torch.utils.data import DataLoader
 from transformers.optimization import AdamW
 
 logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
+    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+    datefmt="%m/%d/%Y %H:%M:%S",
+    level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config, args):
-    loader = DataLoader(test_set, batch_size=config.batch_size, shuffle=False, collate_fn=utils.collate_fn)
+    loader = DataLoader(
+        test_set,
+        batch_size=config.batch_size,
+        shuffle=False,
+        collate_fn=utils.collate_fn,
+    )
     bert_model.eval().to(DEVICE)
     clf_head.eval().to(DEVICE)
     if label_map is not None:
-        loss, metrics = utils.compute_loss_metrics(loader, bert_model, clf_head, label_map, grad_required=False)
+        loss, metrics = utils.compute_loss_metrics(
+            loader, bert_model, clf_head, label_map, grad_required=False
+        )
     else:
         loss, metrics = utils.qa_evaluate(
             args.test_lang,
@@ -73,23 +82,32 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
             optimizer_grouped_parameters = [
                 {
                     "params": [
-                        p for n, p in list(learner.named_parameters()) + extra if not any(nd in n for nd in no_decay)
+                        p
+                        for n, p in list(learner.named_parameters()) + extra
+                        if not any(nd in n for nd in no_decay)
                     ],
                     "weight_decay": config.weight_decay,
                 },
                 {
                     "params": [
-                        p for n, p in list(learner.named_parameters()) + extra if any(nd in n for nd in no_decay)
+                        p
+                        for n, p in list(learner.named_parameters()) + extra
+                        if any(nd in n for nd in no_decay)
                     ],
                     "weight_decay": 0.0,
                 },
             ]
-            optimizer = AdamW(optimizer_grouped_parameters, eps=1e-8, lr=config.inner_lr)
+            optimizer = AdamW(
+                optimizer_grouped_parameters, eps=1e-8, lr=config.inner_lr
+            )
 
         support_task, query_task = task.test_sample(k=shots)
         for _ in range(inner_loop_steps):
             support_loader = DataLoader(
-                data_utils.InnerDataset(support_task), batch_size=task_bs, shuffle=True, num_workers=0
+                data_utils.InnerDataset(support_task),
+                batch_size=task_bs,
+                shuffle=True,
+                num_workers=0,
             )
             support_error, _ = utils.compute_loss_metrics(
                 support_loader,
@@ -113,7 +131,10 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
         encoder = encoder.eval()
         learner = learner.eval()
         query_loader = DataLoader(
-            data_utils.InnerDataset(query_task), batch_size=task_bs, shuffle=False, num_workers=0
+            data_utils.InnerDataset(query_task),
+            batch_size=task_bs,
+            shuffle=False,
+            num_workers=0,
         )
         if label_map is not None:
             query_error, metrics = utils.compute_loss_metrics(
@@ -152,11 +173,27 @@ def evaluate(test_set, label_map, bert_model, clf_head, config, args, shots):
 
 
 def init_args():
-    parser = argparse.ArgumentParser(description="Test POS tagging on various UD datasets")
-    parser.add_argument("--test_lang", dest="test_lang", type=str, help="Language to test on", required=True)
-    parser.add_argument("--model_path", dest="model_path", type=str, help="Path of the model to load", required=True)
+    parser = argparse.ArgumentParser(
+        description="Test POS tagging on various UD datasets"
+    )
+    parser.add_argument(
+        "--test_lang",
+        dest="test_lang",
+        type=str,
+        help="Language to test on",
+        required=True,
+    )
+    parser.add_argument(
+        "--model_path",
+        dest="model_path",
+        type=str,
+        help="Path of the model to load",
+        required=True,
+    )
     parser.add_argument("--inner_lr", type=float, help="New learning rate", default=0.0)
-    parser.add_argument("--use_train_lr", action="store_true", help="Use meta-learned learning rates")
+    parser.add_argument(
+        "--use_train_lr", action="store_true", help="Use meta-learned learning rates"
+    )
     return parser.parse_args()
 
 
@@ -182,27 +219,40 @@ def main():
     if "/pos/" in data_dir:
         data_class = data_utils.POS
         label_map = {idx: l for idx, l in enumerate(data_utils.get_pos_labels())}
-    elif "/ner/" in data_dir:
-        data_class = data_utils.NER
-        label_map = {idx: l for idx, l in enumerate(data_utils.get_ner_labels())}
     elif "/tydiqa" in data_dir or "squad" in data_dir:
         data_class = data_utils.QA
         label_map = None
         config.max_clen = 512
     else:
-        raise ValueError(f"Unknown task or incorrect `config.data_dir`: {config.data_dir}")
+        raise ValueError(
+            f"Unknown task or incorrect `config.data_dir`: {config.data_dir}"
+        )
 
     bert_model = model_utils.BERT(config)
     if label_map is not None:
         test_set = data_class(test_path, config.max_seq_length, config.model_type)
-        clf_head = model_utils.SeqClfHead(len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size())
+        clf_head = model_utils.SeqClfHead(
+            len(label_map), config.hidden_dropout_prob, bert_model.get_hidden_size()
+        )
     else:
-        test_set = data_class(test_path, config.max_clen, config.max_qlen, config.doc_stride, config.model_type)
-        clf_head = model_utils.ClfHead(config.hidden_dropout_prob, bert_model.get_hidden_size())
+        test_set = data_class(
+            test_path,
+            config.max_clen,
+            config.max_qlen,
+            config.doc_stride,
+            config.model_type,
+        )
+        clf_head = model_utils.ClfHead(
+            config.hidden_dropout_prob, bert_model.get_hidden_size()
+        )
 
     if config.train_type != "mtl":
-        bert_model = meta_utils.ParamMetaSGD(bert_model, lr=config.inner_lr, first_order=config.is_fomaml)
-        clf_head = meta_utils.ParamMetaSGD(clf_head, lr=config.inner_lr, first_order=config.is_fomaml)
+        bert_model = meta_utils.ParamMetaSGD(
+            bert_model, lr=config.inner_lr, first_order=config.is_fomaml
+        )
+        clf_head = meta_utils.ParamMetaSGD(
+            clf_head, lr=config.inner_lr, first_order=config.is_fomaml
+        )
 
     if os.path.isfile(load_encoder_path):
         bert_model.load_state_dict(torch.load(load_encoder_path))
@@ -213,9 +263,13 @@ def main():
     summary_metrics = {}
     for shot in shots:
         if shot == 0:
-            summary_metrics["0"] = zero_shot_evaluate(test_set, label_map, bert_model, clf_head, config, args)
+            summary_metrics["0"] = zero_shot_evaluate(
+                test_set, label_map, bert_model, clf_head, config, args
+            )
         else:
-            summary_metrics[str(shot)] = evaluate(test_set, label_map, bert_model, clf_head, config, args, shot)
+            summary_metrics[str(shot)] = evaluate(
+                test_set, label_map, bert_model, clf_head, config, args, shot
+            )
 
     save_dir = os.path.join(args.model_path, "result")
     os.makedirs(save_dir, exist_ok=True)

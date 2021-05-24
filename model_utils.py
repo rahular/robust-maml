@@ -39,14 +39,18 @@ class BERT(nn.Module):
         super(BERT, self).__init__()
         self.config = config
         self.tokenizer = BertTokenizer.from_pretrained(self.config.model_type)
-        self.bert = BertModel.from_pretrained(self.config.model_type, add_pooling_layer=False)
+        self.bert = BertModel.from_pretrained(
+            self.config.model_type, add_pooling_layer=False
+        )
 
     def get_hidden_size(self):
         return self.bert.config.hidden_size
 
     def forward(self, input_ids, attention_mask, token_type_ids):
         outputs = self.bert(
-            input_ids.to(DEVICE), attention_mask=attention_mask.to(DEVICE), token_type_ids=token_type_ids.to(DEVICE)
+            input_ids.to(DEVICE),
+            attention_mask=attention_mask.to(DEVICE),
+            token_type_ids=token_type_ids.to(DEVICE),
         )
         return outputs
 
@@ -80,7 +84,9 @@ class SeqClfHead(nn.Module):
                 active_loss = attention_mask.view(-1) == 1
                 active_logits = logits.view(-1, self.num_labels)
                 active_labels = torch.where(
-                    active_loss.to(DEVICE), labels.view(-1), torch.tensor(self.loss_fct.ignore_index).type_as(labels)
+                    active_loss.to(DEVICE),
+                    labels.view(-1),
+                    torch.tensor(self.loss_fct.ignore_index).type_as(labels),
                 )
                 loss = self.loss_fct(active_logits, active_labels)
             else:
@@ -127,5 +133,9 @@ class ClfHead(nn.Module):
             total_loss = (start_loss + end_loss) / 2
 
         return QuestionAnsweringModelOutput(
-            loss=total_loss, start_logits=start_logits, end_logits=end_logits, hidden_states=None, attentions=None,
+            loss=total_loss,
+            start_logits=start_logits,
+            end_logits=end_logits,
+            hidden_states=None,
+            attentions=None,
         )

@@ -15,7 +15,25 @@ from shutil import copyfile
 
 # download UD and point to it here.
 UD_DIR = "./data/ud/ud-treebanks-v2.6"
-test_langs = set(["abq", "bm", "bxr", "eu", "gun", "pcm", "th", "wbp", "id", "tl", "ta", "te", "wo", "yo"])
+test_langs = set(
+    [
+        "abq",
+        "bm",
+        "bxr",
+        "eu",
+        "gun",
+        "pcm",
+        "th",
+        "wbp",
+        "id",
+        "tl",
+        "ta",
+        "te",
+        "wo",
+        "yo",
+    ]
+)
+
 
 def get_info(split, langs):
     count, empty = 0, 0

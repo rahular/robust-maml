@@ -1,34 +1,25 @@
 # pos-bert
 
+Code to reproduce the results described in the paper "Minimax and Neyman-Pearson Meta-Learning for Outlier Languages".
+
 1. Create conda env: `conda create -n pos-bert python=3.7`
 2. Install dependencies: `pip install -r requirements.txt`
-3. Run data creation scripts (`make_pos_data.py` and `make_ner_data.py`. See top comments in files for more details)
-5. Copy configs from the `configs` folder and use them to start training (DO NOT modify existing configs)
+3. Run data creation scripts (`make_pos_data.py` and `make_qa_data.py`. See top comments in files for more details)
+5. Use the configs from the `configs` folder or suitably modify them as required to start training
 
-Trainer usage
+To start training, simply pass the config path to `trainer.py`
 ```
-usage: trainer.py [-h] --config_path CONFIG_PATH [--train_type {meta,mtl}]
-
-Train a classifier
-
-optional arguments:
-  -h, --help            show this help message and exit
-  --config_path CONFIG_PATH
-                        Path of the config containing training params
+$ python trainer.py --config_path=<config-path>
 ```
 
-Tester usage
+To run fast adapt, and evaluate the trained models on one outlier-language, run
 ```
-usage: tester.py [-h] --test_lang TEST_LANG --model_path MODEL_PATH
-
-Test POS tagging on various UD datasets
-
-optional arguments:
-  -h, --help            show this help message and exit
-  --test_lang TEST_LANG
-                        Language to test on
-  --model_path MODEL_PATH
-                        Path of the model to load
+$ python tester.py --test_lang=<lang> --model_path=<saved-model-path>
 ```
 
-The test results will be stored under `<MODEL_PATH/result>`
+To run the tester on all outlier-languages, use `run_test.sh`. It contains two functions, `run_pos` and `run_qa` which will evaluate POS tagging and QA on all languages, respectively. The individual language results will be stored in `<saved-model-path>/result`. To merge them all into a single CSV file, run
+```
+$ python create_csv.py --model_path=<saved-model-path>
+```
+
+For QA, since we split the languages into two groups and train two models. Therefore, `create_csv.py` expects 2 paths: `--model_path` and `--model_path2`

@@ -22,7 +22,9 @@ from transformers.data.metrics.squad_metrics import (
 )
 
 logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO
+    format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+    datefmt="%m/%d/%Y %H:%M:%S",
+    level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 savedir = None
@@ -33,7 +35,9 @@ def get_savedir_name():
     if not savedir:
         savedir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         # just to be extra careful
-        savedir += "-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+        savedir += "-" + "".join(
+            random.choices(string.ascii_uppercase + string.digits, k=4)
+        )
         logging.info(f"All models will be saved at: {savedir}")
     return savedir
 
@@ -85,7 +89,12 @@ def compute_loss_metrics(
     gold, preds, loss = None, None, None
     for features in loader:
         # it is done this way to be consistent with both outer (regular) and inner (meta) dataloaders
-        input_ids, attention_mask, token_type_ids, labels = features[0], features[1], features[2], features[3]
+        input_ids, attention_mask, token_type_ids, labels = (
+            features[0],
+            features[1],
+            features[2],
+            features[3],
+        )
         with torch.set_grad_enabled(grad_required and enc_grad_required):
             bert_output = bert_model(input_ids, attention_mask, token_type_ids)
         with torch.set_grad_enabled(grad_required):
@@ -95,16 +104,22 @@ def compute_loss_metrics(
         else:
             loss = torch.cat([loss, output.loss], 0)
 
-        if return_metrics and label_map is not None:  # HACK: easiest way to identify if the task not sequence labeling
+        if (
+            return_metrics and label_map is not None
+        ):  # HACK: easiest way to identify if the task not sequence labeling
             for lgt, lbl in zip(output.logits, labels):
                 if preds is None:
                     preds = torch.unsqueeze(lgt.detach().cpu(), 0)
                 else:
-                    preds = torch.cat((preds, torch.unsqueeze(lgt.detach().cpu(), 0)), dim=0)
+                    preds = torch.cat(
+                        (preds, torch.unsqueeze(lgt.detach().cpu(), 0)), dim=0
+                    )
                 if gold is None:
                     gold = torch.unsqueeze(lbl.detach().cpu(), 0)
                 else:
-                    gold = torch.cat((gold, torch.unsqueeze(lbl.detach().cpu(), 0)), dim=0)
+                    gold = torch.cat(
+                        (gold, torch.unsqueeze(lbl.detach().cpu(), 0)), dim=0
+                    )
 
     metrics = None
     if preds is not None and gold is not None:
@@ -164,7 +179,14 @@ def qa_evaluate(lang, test_set, model_type, loader, bert_model, learner, save_di
 
 
 def collate_fn(batch):
-    input_ids, attention_mask, token_type_ids, label_ids, unique_ids, languages = [], [], [], [], [], []
+    input_ids, attention_mask, token_type_ids, label_ids, unique_ids, languages = (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
     for f, l in batch:
         input_ids.append(f["input_ids"])
         attention_mask.append(f["attention_mask"])
@@ -192,10 +214,16 @@ class BalancedTaskSampler(data.sampler.Sampler):
         self.dataset = dataset
         self.batch_size = batch_size
         self.number_of_datasets = len(dataset.datasets)
-        self.largest_dataset_size = max([len(cur_dataset.features) for cur_dataset in dataset.datasets])
+        self.largest_dataset_size = max(
+            [len(cur_dataset.features) for cur_dataset in dataset.datasets]
+        )
 
     def __len__(self):
-        return self.batch_size * math.ceil(self.largest_dataset_size / self.batch_size) * len(self.dataset.datasets)
+        return (
+            self.batch_size
+            * math.ceil(self.largest_dataset_size / self.batch_size)
+            * len(self.dataset.datasets)
+        )
 
     def __iter__(self):
         samplers_list = []
@@ -238,8 +266,20 @@ class BalancedTaskSampler(data.sampler.Sampler):
 
 def clip_grad_norm(grads, max_norm):
     device = grads[0].device
-    total_norm = torch.norm(torch.stack([torch.norm(grad.detach(), 2).to(device) for grad in grads if grad is not None]), 2)
+    total_norm = torch.norm(
+        torch.stack(
+            [
+                torch.norm(grad.detach(), 2).to(device)
+                for grad in grads
+                if grad is not None
+            ]
+        ),
+        2,
+    )
     clip_coef = max_norm / (total_norm + 1e-6)
     if clip_coef < 1:
-        grads = [grad.detach().mul_(clip_coef.to(grad.device)) if grad is not None else None for grad in grads]
+        grads = [
+            grad.detach().mul_(clip_coef.to(grad.device)) if grad is not None else None
+            for grad in grads
+        ]
     return tuple(grads)

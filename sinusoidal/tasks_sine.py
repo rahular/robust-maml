@@ -21,11 +21,15 @@ class RegressionTasksSinusoidal:
         self.input_range = [-5, 5]
 
     def get_input_range(self, size=100):
-        return torch.linspace(self.input_range[0], self.input_range[1], steps=size).unsqueeze(1)
+        return torch.linspace(
+            self.input_range[0], self.input_range[1], steps=size
+        ).unsqueeze(1)
 
     def sample_inputs(self, batch_size, *args, **kwargs):
         inputs = torch.rand((batch_size, self.num_inputs))
-        inputs = inputs * (self.input_range[1] - self.input_range[0]) + self.input_range[0]
+        inputs = (
+            inputs * (self.input_range[1] - self.input_range[0]) + self.input_range[0]
+        )
         return inputs
 
     def _skew(self, prange):
@@ -75,11 +79,19 @@ class RegressionTasksSinusoidal:
         :return:
         """
 
-        amplitudes = torch.Tensor(np.random.uniform(self.amplitude_range[0], self.amplitude_range[1], batch_size))
-        phases = torch.Tensor(np.random.uniform(self.phase_range[0], self.phase_range[1], batch_size))
+        amplitudes = torch.Tensor(
+            np.random.uniform(
+                self.amplitude_range[0], self.amplitude_range[1], batch_size
+            )
+        )
+        phases = torch.Tensor(
+            np.random.uniform(self.phase_range[0], self.phase_range[1], batch_size)
+        )
 
         inputs = torch.rand((batch_size, self.num_inputs))
-        inputs = inputs * (self.input_range[1] - self.input_range[0]) + self.input_range[0]
+        inputs = (
+            inputs * (self.input_range[1] - self.input_range[0]) + self.input_range[0]
+        )
         inputs = inputs.view(-1)
 
         outputs = torch.sin(inputs - phases) * amplitudes
