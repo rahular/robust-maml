@@ -1,4 +1,4 @@
-# pos-bert
+# robust-maml
 
 Code to reproduce the results described in the paper "Minimax and Neyman-Pearson Meta-Learning for Outlier Languages".
 
