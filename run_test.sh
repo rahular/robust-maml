@@ -29,15 +29,14 @@ run_pos() {
 }
 
 run_qa() {
-    run "finnish" $1
-    run "korean" $1
-    run "russian" $1
-    run "indonesian" $1
-    run "telugu" $1
-    run "bengali" $1
-    run "swahili" $1
-    run "english" $1
-    run "arabic" $1
+    run "finnish" $1    # split 1
+    run "korean" $1     # split 1
+    run "bengali" $1    # split 1
+    run "arabic" $1     # split 1
+    run "russian" $1    # split 2
+    run "indonesian" $1 # split 2
+    run "telugu" $1     # split 2
+    run "swahili" $1    # split 2
 }
 
 run_pos $1
