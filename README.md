@@ -1,6 +1,6 @@
 # robust-maml
 
-Code to reproduce the results described in the paper "Minimax and Neyman-Pearson Meta-Learning for Outlier Languages".
+Code to reproduce the results described in the paper "Minimax and Neyman-Pearson Meta-Learning for Outlier Languages" [(arXiv)](https://arxiv.org/abs/2106.01051).
 
 1. Create conda env: `conda create -n pos-bert python=3.7`
 2. Install dependencies: `pip install -r requirements.txt`
@@ -23,3 +23,15 @@ $ python create_csv.py --model_path=<saved-model-path>
 ```
 
 For QA, since we split the languages into two groups and train two models. Therefore, `create_csv.py` expects 2 paths: `--model_path` and `--model_path2`
+
+### Citation
+```
+@misc{ponti2021minimax,
+      title={Minimax and Neyman-Pearson Meta-Learning for Outlier Languages}, 
+      author={Edoardo Maria Ponti and Rahul Aralikatte and Disha Shrivastava and Siva Reddy and Anders Søgaard},
+      year={2021},
+      eprint={2106.01051},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL}
+}
+```
