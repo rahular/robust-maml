@@ -1,6 +1,6 @@
 # robust-maml
 
-Code to reproduce the results described in the paper "Minimax and Neyman-Pearson Meta-Learning for Outlier Languages" [(arXiv)](https://arxiv.org/abs/2106.01051).
+Code to reproduce the results described in the paper "Minimax and Neyman-Pearson Meta-Learning for Outlier Languages" [(aclweb)](https://aclanthology.org/2021.findings-acl.106/).
 
 1. Create conda env: `conda create -n pos-bert python=3.7`
 2. Install dependencies: `pip install -r requirements.txt`
@@ -26,12 +26,19 @@ For QA, since we split the languages into two groups and train two models. There
 
 ### Citation
 ```
-@misc{ponti2021minimax,
-      title={Minimax and Neyman-Pearson Meta-Learning for Outlier Languages}, 
-      author={Edoardo Maria Ponti and Rahul Aralikatte and Disha Shrivastava and Siva Reddy and Anders Søgaard},
-      year={2021},
-      eprint={2106.01051},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL}
+@inproceedings{ponti-etal-2021-minimax,
+    title = "Minimax and Neyman{--}{P}earson Meta-Learning for Outlier Languages",
+    author = "Ponti, Edoardo Maria  and
+      Aralikatte, Rahul  and
+      Shrivastava, Disha  and
+      Reddy, Siva  and
+      S{\o}gaard, Anders",
+    booktitle = "Findings of the Association for Computational Linguistics: ACL-IJCNLP 2021",
+    month = aug,
+    year = "2021",
+    address = "Online",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2021.findings-acl.106",
+    pages = "1245--1260",
 }
 ```
