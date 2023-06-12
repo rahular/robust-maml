@@ -1,6 +1,6 @@
 pyconll==2.2.0
 torch==1.7
-transformers==3.3.1
+transformers==4.30.0
 seqeval==0.0.12
 tensorboard==2.2.2
 learn2learn==0.1.3
